@@ -268,6 +268,7 @@ namespace WorkMatePro
         private const long MaximumPayloadBytes = 512L * 1024 * 1024;
         private const long MaximumPackageBytes = 600L * 1024 * 1024;
         private readonly JavaScriptSerializer serializer = new JavaScriptSerializer();
+        private readonly object serializerSync = new object();
         private readonly object currentHashSync = new object();
         private string cachedCurrentHash;
 
@@ -314,7 +315,7 @@ namespace WorkMatePro
                     signatureBytes = ReadEntryBytes(RequireEntry(archive, "manifest.sig"), MaximumSignatureBytes);
                     if (!UpdateTrust.Verify(manifestBytes, UpdateTrust.DecodeSignature(signatureBytes)))
                         throw new InvalidDataException("更新包签名无效，已拒绝导入。");
-                    manifest = serializer.Deserialize<UpdatePackageManifest>(Encoding.UTF8.GetString(manifestBytes));
+                    manifest = DeserializeJson<UpdatePackageManifest>(manifestBytes);
                     ValidateManifest(manifest, true);
 
                     ZipArchiveEntry payload = RequireEntry(archive, manifest.PayloadFile);
@@ -483,6 +484,12 @@ namespace WorkMatePro
             if (process == null) throw new InvalidOperationException("无法启动独立更新器。");
         }
 
+        public void DiscardStagedUpdate(StagedUpdate staged)
+        {
+            if (staged == null || string.IsNullOrWhiteSpace(staged.StageDirectory)) return;
+            TryDeleteOwnedStage(staged.StageDirectory);
+        }
+
         public static string Sha256File(string path)
         {
             using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
@@ -525,7 +532,7 @@ namespace WorkMatePro
                 throw new InvalidDataException("更新目录签名大小异常。");
             if (!UpdateTrust.Verify(catalogBytes, UpdateTrust.DecodeSignature(signatureText)))
                 throw new InvalidDataException("更新目录签名无效。");
-            UpdateCatalog catalog = serializer.Deserialize<UpdateCatalog>(Encoding.UTF8.GetString(catalogBytes));
+            UpdateCatalog catalog = DeserializeJson<UpdateCatalog>(catalogBytes);
             if (catalog == null || catalog.SchemaVersion != 1 || catalog.ProductId != ProductId)
                 throw new InvalidDataException("更新目录格式或产品标识无效。");
             if (CompareVersions(catalog.LatestVersion, CurrentVersion) <= 0)
@@ -586,12 +593,18 @@ namespace WorkMatePro
                     byte[] manifestBytes = ReadEntryBytes(RequireEntry(archive, "manifest.json"), MaximumManifestBytes);
                     byte[] signatureBytes = ReadEntryBytes(RequireEntry(archive, "manifest.sig"), MaximumSignatureBytes);
                     if (!UpdateTrust.Verify(manifestBytes, UpdateTrust.DecodeSignature(signatureBytes))) return false;
-                    manifest = serializer.Deserialize<UpdatePackageManifest>(Encoding.UTF8.GetString(manifestBytes));
+                    manifest = DeserializeJson<UpdatePackageManifest>(manifestBytes);
                     ValidateManifest(manifest, false);
                     return true;
                 }
             }
             catch { manifest = null; return false; }
+        }
+
+        private T DeserializeJson<T>(byte[] jsonBytes)
+        {
+            lock (serializerSync)
+                return serializer.Deserialize<T>(Encoding.UTF8.GetString(jsonBytes));
         }
 
         private void ValidateManifest(UpdatePackageManifest manifest, bool requirePayload)

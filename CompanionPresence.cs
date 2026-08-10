@@ -14,6 +14,23 @@ namespace WorkMatePro
         }
     }
 
+    /// <summary>更新拖放与普通文件中转完全隔离，只识别单个 WorkMate 签名更新包。</summary>
+    public static class UpdateDropPolicy
+    {
+        public static readonly bool Enabled = true;
+        public const string PackageSuffix = ".workmate-update.zip";
+
+        public static bool TrySelectSinglePackage(string[] paths, out string packagePath)
+        {
+            packagePath = null;
+            if (!Enabled || paths == null || paths.Length != 1 || string.IsNullOrWhiteSpace(paths[0])) return false;
+            string candidate = paths[0].Trim();
+            if (!candidate.EndsWith(PackageSuffix, StringComparison.OrdinalIgnoreCase)) return false;
+            packagePath = candidate;
+            return true;
+        }
+    }
+
     /// <summary>小尺寸桌宠的悬停胶囊只回答“它现在怎样”，避免长名称、等级和任务串成一行后被裁断。</summary>
     public static class PetIdentityChipPolicy
     {

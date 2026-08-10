@@ -821,7 +821,7 @@ namespace WorkMatePro
             updateBody.Children.Add(updateStatus);
             utilityContent.Children.Add(CapabilityCard(
                 "离线增量更新",
-                "联网电脑只需下载与当前 EXE 哈希匹配的差分 ZIP，再通过 U 盘或合规通道拷入公司电脑。导入时会验证 RSA 签名、基线哈希和目标哈希；替换失败或新版本启动不健康会自动回滚。",
+                "联网电脑只需下载与当前 EXE 哈希匹配的差分 ZIP，再通过 U 盘或合规通道拷入公司电脑。可把单个更新包直接拖到桌宠身上并确认一次；导入时会验证 RSA 签名、基线哈希和目标哈希，失败自动回滚。",
                 "离线优先 · 可回滚",
                 updateBody));
 
@@ -1034,47 +1034,7 @@ namespace WorkMatePro
 
         private void ImportUpdatePackage(string path, TextBlock status)
         {
-            status.Text = "正在验证更新包签名、版本基线和 SHA-256…";
-            System.Threading.ThreadPool.QueueUserWorkItem(delegate
-            {
-                StagedUpdate staged = app.Updates.StagePackage(path);
-                Dispatcher.BeginInvoke(new Action(delegate
-                {
-                    if (!staged.Success)
-                    {
-                        status.Text = "更新包已拒绝：" + staged.Error;
-                        return;
-                    }
-                    string kind = staged.Kind == "delta" ? "差分更新" : "全量兜底更新";
-                    string transition = staged.Kind == "delta"
-                        ? "v" + staged.FromVersion + " → v" + staged.ToVersion
-                        : "安装 v" + staged.ToVersion + "（全量包，不要求旧版哈希）";
-                    MessageBoxResult choice = MessageBox.Show(
-                        this,
-                        kind + "已通过签名与哈希校验。\n\n"
-                            + transition
-                            + (string.IsNullOrWhiteSpace(staged.Notes) ? "" : "\n\n" + staged.Notes)
-                            + "\n\n安装时 WorkMate 会正常退出、原子替换并启动新版本；启动检查失败会自动恢复备份。现在安装吗？",
-                        "确认安装 WorkMate 更新",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Warning);
-                    if (choice != MessageBoxResult.Yes)
-                    {
-                        status.Text = "更新包已验证并暂存，本次未安装。";
-                        return;
-                    }
-                    try
-                    {
-                        app.Updates.LaunchStagedUpdate(staged);
-                        status.Text = "独立更新器已启动，WorkMate 即将退出。";
-                        app.ExitApp();
-                    }
-                    catch (Exception ex)
-                    {
-                        status.Text = "无法启动更新器：" + ex.Message;
-                    }
-                }));
-            });
+            app.UpdateInstaller.BeginImport(path, this, delegate(string message) { status.Text = message; });
         }
 
         private UIElement CapabilityCard(string title, string description, string badge, UIElement body)

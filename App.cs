@@ -813,6 +813,7 @@ namespace WorkMatePro
         public OpenMeteoWeatherService Weather { get; private set; }
         public CustomPetService CustomPets { get; private set; }
         public UpdateManager Updates { get; private set; }
+        public UpdateInstallCoordinator UpdateInstaller { get; private set; }
         public bool IsExiting { get; private set; }
 
         // 感知与行为层（Kimi 轮新增）
@@ -885,6 +886,7 @@ namespace WorkMatePro
             Ocr = new WindowsOcrService(Tools, Store.RootDirectory);
             Weather = new OpenMeteoWeatherService();
             Updates = new UpdateManager();
+            UpdateInstaller = new UpdateInstallCoordinator(this, Updates);
             nextAmbientPollAt = DateTime.Now.AddSeconds(15);
             lastProactiveAt = DateTime.Now;
 
@@ -998,6 +1000,17 @@ namespace WorkMatePro
                 });
             };
             localUpdateProbe.Start();
+
+            string droppedUpdateE2E;
+            if (Environment.GetEnvironmentVariable("WORKMATE_UPDATE_E2E") == "1"
+                && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WORKMATE_TEST_DIR"))
+                && UpdateApplier.TryArgument(args, "--update-e2e-drop-install", out droppedUpdateE2E))
+            {
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    UpdateInstaller.BeginImportForE2E(droppedUpdateE2E, Pet, Pet.UpdateToast);
+                }));
+            }
 
             if (args.Contains("--update-health-exit"))
             {

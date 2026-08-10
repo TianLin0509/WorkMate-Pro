@@ -226,6 +226,17 @@ namespace WorkMatePro
                     "ambient-input-grace-prevents-trigger-tail-cancel", log, ref failures);
                 Check(!PetInteractionPolicy.FileCarryEnabled && !PetInteractionPolicy.HasActiveCarry(3),
                     "file-carry-interaction-rolled-back", log, ref failures);
+                string selectedUpdatePackage;
+                Check(UpdateDropPolicy.Enabled
+                    && UpdateDropPolicy.TrySelectSinglePackage(
+                        new[] { @"C:\Downloads\WorkMate-delta-1.24.0-to-1.24.1.WORKMATE-UPDATE.ZIP" },
+                        out selectedUpdatePackage)
+                    && selectedUpdatePackage.EndsWith(UpdateDropPolicy.PackageSuffix, StringComparison.OrdinalIgnoreCase)
+                    && !UpdateDropPolicy.TrySelectSinglePackage(new[] { @"C:\Downloads\source-code.zip" }, out selectedUpdatePackage)
+                    && !UpdateDropPolicy.TrySelectSinglePackage(
+                        new[] { @"C:\Downloads\one.workmate-update.zip", @"C:\Downloads\two.workmate-update.zip" },
+                        out selectedUpdatePackage),
+                    "update-drop-accepts-only-one-package-suffix", log, ref failures);
                 Check(PetIdentityChipPolicy.CompactLabel("阿企 Neo", 4, "专注 · 24:09", "", 0, true) == "专注 · 24:09"
                     && PetIdentityChipPolicy.CompactLabel("阿企 Neo", 4, "", "整理技术方案", 0, true).StartsWith("在做 · 整理技术")
                     && PetIdentityChipPolicy.CompactLabel("阿企 Neo", 4, "", "", 0, true) == "阿企 · Lv.4"

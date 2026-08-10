@@ -195,7 +195,7 @@ namespace WorkMatePro
             WindowPrivacy.Bind(this, delegate { return app.Store.Data.HideFromCaptureEnabled; }, true);
 
             root = new Grid { Background = Brushes.Transparent, Cursor = Cursors.Hand };
-            root.AllowDrop = PetInteractionPolicy.FileCarryEnabled;
+            root.AllowDrop = PetInteractionPolicy.FileCarryEnabled || UpdateDropPolicy.Enabled;
 
             scaleTransform = new ScaleTransform(1, 1);
             tiltTransform = new RotateTransform(0);
@@ -380,7 +380,7 @@ namespace WorkMatePro
             root.MouseLeftButtonUp += PointerUp;
             root.LostMouseCapture += delegate { CancelSquishPress(); };
             root.MouseRightButtonUp += delegate { OpenBubble(); };
-            if (PetInteractionPolicy.FileCarryEnabled)
+            if (PetInteractionPolicy.FileCarryEnabled || UpdateDropPolicy.Enabled)
             {
                 root.DragEnter += PetDragEnter;
                 root.DragOver += PetDragEnter;
@@ -2639,25 +2639,41 @@ namespace WorkMatePro
 
         private void PetDragEnter(object sender, DragEventArgs e)
         {
-            if (e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.UnicodeText))
+            string updatePackage;
+            bool updateDrop = TryGetDroppedUpdatePackage(e.Data, out updatePackage);
+            bool carryDrop = PetInteractionPolicy.FileCarryEnabled
+                && (e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent(DataFormats.UnicodeText));
+            if (updateDrop || carryDrop)
             {
                 e.Effects = DragDropEffects.Copy;
-                if (!dropPreviewActive && !exclusiveAnimation && dockState == DockState.None && PetAssets.SupportsAnimation(app.Store.Data.PetId))
+                if (!dropPreviewActive)
                 {
                     dropPreviewActive = true;
-                    idleGestureTimer.Stop();
-                    behaviorAnimation = "drop-preview";
-                    ShowAnimationFrame("carry-file", 1);
-                    exclusiveStatus = "准备叼住";
-                    lastChipText = "";
-                    UpdateChip();
+                    if (!exclusiveAnimation && dockState == DockState.None && PetAssets.SupportsAnimation(app.Store.Data.PetId))
+                    {
+                        idleGestureTimer.Stop();
+                        behaviorAnimation = "drop-preview";
+                        ShowAnimationFrame("carry-file", 1);
+                    }
                 }
+                exclusiveStatus = updateDrop ? "松开即可更新" : "准备叼住";
+                lastChipText = "";
+                UpdateChip();
             }
-            else e.Effects = DragDropEffects.None;
+            else
+            {
+                e.Effects = DragDropEffects.None;
+                EndDropPreview();
+            }
             e.Handled = true;
         }
 
         private void PetDragLeave(object sender, DragEventArgs e)
+        {
+            EndDropPreview();
+        }
+
+        private void EndDropPreview()
         {
             if (!dropPreviewActive) return;
             dropPreviewActive = false;
@@ -2669,15 +2685,22 @@ namespace WorkMatePro
 
         private void PetDrop(object sender, DragEventArgs e)
         {
-            dropPreviewActive = false;
-            exclusiveStatus = "";
+            EndDropPreview();
+            string updatePackage;
+            if (TryGetDroppedUpdatePackage(e.Data, out updatePackage))
+            {
+                app.UpdateInstaller.BeginImport(updatePackage, this, UpdateToast);
+                e.Handled = true;
+                return;
+            }
+
             int count = 0;
-            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            if (PetInteractionPolicy.FileCarryEnabled && e.Data.GetDataPresent(DataFormats.FileDrop))
             {
                 string[] files = e.Data.GetData(DataFormats.FileDrop) as string[];
                 count = app.Carry.AddFiles(files);
             }
-            else if (e.Data.GetDataPresent(DataFormats.UnicodeText))
+            else if (PetInteractionPolicy.FileCarryEnabled && e.Data.GetDataPresent(DataFormats.UnicodeText))
             {
                 string value = e.Data.GetData(DataFormats.UnicodeText) as string;
                 if (!string.IsNullOrWhiteSpace(value))
@@ -2694,6 +2717,13 @@ namespace WorkMatePro
                 app.RefreshOpenWindows();
             }
             e.Handled = true;
+        }
+
+        private static bool TryGetDroppedUpdatePackage(System.Windows.IDataObject data, out string packagePath)
+        {
+            packagePath = null;
+            if (data == null || !data.GetDataPresent(DataFormats.FileDrop)) return false;
+            return UpdateDropPolicy.TrySelectSinglePackage(data.GetData(DataFormats.FileDrop) as string[], out packagePath);
         }
 
         public void ShowMeeting(MeetingInfo meeting)
@@ -3042,6 +3072,12 @@ namespace WorkMatePro
         {
             if (QuietModeActive) return;
             ShowToast(Formatters.Truncate(message, 64));
+        }
+
+        /// <summary>用户主动拖入更新包后的高优先级反馈；安静模式也必须显示验签结果。</summary>
+        public void UpdateToast(string message)
+        {
+            ShowToast("↻  " + Formatters.Truncate(message, 62));
         }
 
         /// <summary>能力递送：宠物先做一次轻量反馈，再把可点击提示叼到用户面前。</summary>

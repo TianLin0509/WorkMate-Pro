@@ -12,7 +12,7 @@ using System.Windows.Media;
 
 namespace WorkMatePro
 {
-    public sealed class WorkbenchWindow : Window
+    public sealed partial class WorkbenchWindow : Window
     {
         private readonly WorkMateApp app;
         private readonly Grid pageHost;
@@ -201,7 +201,7 @@ namespace WorkMatePro
 
         public void ShowPage(string page)
         {
-            if (page == "memos" || page == "today" || page == "capabilities" || page == "settings") currentPage = page;
+            if (page == "memos" || page == "today" || page == "capabilities" || page == "settings" || page == "custom-pet") currentPage = page;
             BuildSidebar();
             BuildCurrentPage();
             // 显式打开/二次启动时先租用 900ms 置顶，绕过 Windows 前台锁导致的“已打开但躲在后面”。
@@ -225,7 +225,8 @@ namespace WorkMatePro
         {
             PaintNavigation();
             pageHost.Children.Clear();
-            if (currentPage == "today") pageHost.Children.Add(BuildTodayPage());
+            if (currentPage == "custom-pet") pageHost.Children.Add(BuildCustomPetPage());
+            else if (currentPage == "today") pageHost.Children.Add(BuildTodayPage());
             else if (currentPage == "capabilities") pageHost.Children.Add(BuildCapabilitiesPage());
             else if (currentPage == "settings") pageHost.Children.Add(BuildSettingsPage());
             else pageHost.Children.Add(BuildMemoPage());
@@ -1164,87 +1165,32 @@ namespace WorkMatePro
         private UIElement BuildCustomPetWorkshop()
         {
             StackPanel body = new StackPanel();
-            TextBlock status = Theme.Text("选择 1–3 张照片后，WorkMate 会创建本地项目、生成严格提示词；你用任意支持参考图的生成工具产出四张透明 PNG，再回来校验启用。", 10.5, Theme.Muted, FontWeights.Normal);
-            status.TextWrapping = TextWrapping.Wrap;
-            body.Children.Add(status);
+            List<CustomPetProjectInfo> projects = app.CustomPets.ListProjects();
+            int ready = projects.Count(delegate(CustomPetProjectInfo info) { return info.Ready; });
+            TextBlock overview = Theme.Text(projects.Count == 0
+                ? "从 1–3 张真实照片开始，App 内向导会陪你完成身份锁定、提示词、四姿态映射、质量校验和启用。"
+                : "已有 " + projects.Count + " 个本地项目，其中 " + ready + " 个已就绪；可以继续草稿，也可以创建新伙伴。",
+                10.8, Theme.Muted, FontWeights.Normal);
+            overview.TextWrapping = TextWrapping.Wrap;
+            body.Children.Add(overview);
 
-            WrapPanel identity = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
-            TextBox name = new TextBox { Text = "我的伙伴", MaxLength = 24 };
-            System.Windows.Automation.AutomationProperties.SetName(name, "自定义宠物名字");
-            Border nameShell = Theme.InputShell(name, 38);
-            nameShell.Width = 180;
-            nameShell.Margin = new Thickness(0, 0, 10, 0);
-            identity.Children.Add(nameShell);
-            TextBox species = new TextBox { Text = "宠物猫", MaxLength = 24 };
-            System.Windows.Automation.AutomationProperties.SetName(species, "自定义宠物类型");
-            Border speciesShell = Theme.InputShell(species, 38);
-            speciesShell.Width = 150;
-            identity.Children.Add(speciesShell);
-            body.Children.Add(identity);
-
-            WrapPanel actions = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
-            Button choose = Theme.SecondaryButton(customPetPhotoPaths.Count == 0 ? "选择宠物照片" : "已选 " + customPetPhotoPaths.Count + " 张照片");
-            System.Windows.Automation.AutomationProperties.SetName(choose, "选择自定义宠物参考照片");
-            choose.Margin = new Thickness(0, 0, 9, 9);
-            choose.Click += delegate
+            WrapPanel actions = new WrapPanel { Margin = new Thickness(0, 13, 0, 0) };
+            Button start = Theme.PrimaryButton(projects.Count == 0 ? "开始四步向导" : "打开自定义宠物向导");
+            System.Windows.Automation.AutomationProperties.SetName(start, "打开 App 内自定义宠物四步向导");
+            start.Margin = new Thickness(0, 0, 9, 8);
+            start.Click += delegate { ShowPage("custom-pet"); };
+            actions.Children.Add(start);
+            if (projects.Count > 0)
             {
-                OpenFileDialog dialog = new OpenFileDialog
-                {
-                    Title = "选择 1–3 张清晰的宠物照片",
-                    Filter = "宠物照片|*.png;*.jpg;*.jpeg;*.webp;*.bmp|所有文件|*.*",
-                    Multiselect = true
-                };
-                if (dialog.ShowDialog(this) != true) return;
-                customPetPhotoPaths.Clear();
-                customPetPhotoPaths.AddRange(dialog.FileNames.Take(3));
-                choose.Content = "已选 " + customPetPhotoPaths.Count + " 张照片";
-                status.Text = "照片只会复制到本机 WorkMate 数据目录；创建项目后可在 workflow.html 查看完整步骤。";
-            };
-            actions.Children.Add(choose);
-
-            Button create = Theme.PrimaryButton("创建生成项目");
-            System.Windows.Automation.AutomationProperties.SetName(create, "创建自定义宠物生成项目");
-            create.Margin = new Thickness(0, 0, 9, 9);
-            create.Click += delegate
-            {
-                CustomPetResult created = app.CustomPets.CreateProject(name.Text, species.Text, customPetPhotoPaths);
-                if (!created.Success) { status.Text = created.Error; app.Pet.EventToast(created.Error); return; }
-                customPetProjectPath = created.ProjectDirectory;
-                status.Text = "项目已创建：" + created.ProjectDirectory + "\n下一步：打开 workflow.html，生成后把四张 PNG 放进 generated。";
-                try { Process.Start(created.WorkflowPath); } catch { }
-                app.Pet.EventToast("自定义宠物生成项目已创建");
-            };
-            actions.Children.Add(create);
-
-            Button open = Theme.SecondaryButton("打开最近项目");
-            System.Windows.Automation.AutomationProperties.SetName(open, "打开最近自定义宠物项目");
-            open.Margin = new Thickness(0, 0, 9, 9);
-            open.Click += delegate
-            {
-                string project = customPetProjectPath.Length > 0 ? customPetProjectPath : app.CustomPets.FindLatestProject();
-                if (project.Length == 0) { status.Text = "还没有自定义宠物项目。"; return; }
-                customPetProjectPath = project;
-                try { Process.Start("explorer.exe", "\"" + project + "\""); }
-                catch (Exception ex) { status.Text = "打开失败：" + ex.Message; }
-            };
-            actions.Children.Add(open);
-
-            Button import = Theme.SecondaryButton("校验并启用最近项目");
-            System.Windows.Automation.AutomationProperties.SetName(import, "校验并启用最近自定义宠物项目");
-            import.Margin = new Thickness(0, 0, 9, 9);
-            import.Click += delegate
-            {
-                string project = customPetProjectPath.Length > 0 ? customPetProjectPath : app.CustomPets.FindLatestProject();
-                if (project.Length == 0) { status.Text = "还没有可导入的项目。"; return; }
-                CustomPetResult imported = app.CustomPets.ImportGeneratedAssets(project);
-                if (!imported.Success) { status.Text = imported.Error; app.Pet.EventToast(imported.Error); return; }
-                customPetProjectPath = imported.ProjectDirectory;
-                app.SetPet(imported.PetId, "你的专属伙伴加入 WorkMate 啦");
-                currentPage = "settings";
-            };
-            actions.Children.Add(import);
+                CustomPetProjectInfo latest = projects[0];
+                Button resume = Theme.SecondaryButton("继续 · " + latest.Name);
+                System.Windows.Automation.AutomationProperties.SetName(resume, "继续最近自定义宠物项目 " + latest.Name);
+                resume.Margin = new Thickness(0, 0, 9, 8);
+                resume.Click += delegate { ContinueCustomPetProject(latest); };
+                actions.Children.Add(resume);
+            }
             body.Children.Add(actions);
-            return CapabilityCard("照片 → 二次元桌宠", "外部模型只负责创作；WorkMate 负责身份约束、四姿态文件契约、透明图质量门禁和运行时加载。", "本地项目 · 用户自主生成", body);
+            return CapabilityCard("照片 → 专属桌宠", "全流程已嵌入 WorkMate；照片和中间文件只保存在本机。外部生成工具只负责创作，WorkMate 负责可恢复项目、四姿态契约、透明图质量门禁与运行时加载。", "四步向导 · 可续办", body);
         }
 
         private UIElement BuildSettingRows()

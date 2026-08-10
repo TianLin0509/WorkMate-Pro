@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace WorkMatePro
 {
@@ -112,6 +114,59 @@ namespace WorkMatePro
                 }
                 timer.Stop();
                 log.Add("PASS sprite-cache-stress reads=30000 ms=" + timer.ElapsedMilliseconds);
+
+                timer.Restart();
+                string customData = Path.Combine(root, "custom-pet-stress-data");
+                CustomPetService customPets = new CustomPetService(customData);
+                string reference = Path.Combine(customData, "stress-reference.png");
+                Directory.CreateDirectory(customData);
+                SaveStressPng(PetAssets.Get("01-cat", "idle"), reference);
+                CustomPetResult[] projects = new CustomPetResult[24];
+                Parallel.For(0, projects.Length, delegate(int index)
+                {
+                    projects[index] = customPets.CreateProject("并发伙伴 " + index, "压力测试猫", new[] { reference });
+                });
+                if (projects.Any(delegate(CustomPetResult result) { return result == null || !result.Success; })
+                    || projects.Select(delegate(CustomPetResult result) { return result.PetId; }).Distinct(StringComparer.OrdinalIgnoreCase).Count() != projects.Length)
+                    throw new InvalidDataException("Concurrent custom-pet project creation lost or duplicated a project.");
+
+                string poseRoot = Path.Combine(customData, "pose-sources");
+                Directory.CreateDirectory(poseRoot);
+                Dictionary<string, string> poseSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string action in CustomPetService.RequiredActions)
+                {
+                    string path = Path.Combine(poseRoot, "stress-" + action + ".png");
+                    SaveStressPng(PetAssets.Get("01-cat", "idle"), path);
+                    poseSources[action] = path;
+                }
+                for (int index = 0; index < 12; index++)
+                {
+                    CustomPetResult prepared = customPets.PrepareGeneratedAssets(projects[index].ProjectDirectory, poseSources);
+                    CustomPetResult imported = prepared.Success ? customPets.ImportGeneratedAssets(projects[index].ProjectDirectory) : null;
+                    if (!prepared.Success || imported == null || !imported.Success)
+                        throw new InvalidDataException("Custom-pet full flow failed at project " + index + ": "
+                            + (prepared.Error ?? (imported == null ? "no import result" : imported.Error)));
+                }
+                List<PetDefinition> readyDefinitions = CustomPetService.LoadReadyDefinitions(customPets.CustomRoot);
+                if (readyDefinitions.Count != 12) throw new InvalidDataException("Ready custom-pet count mismatch: " + readyDefinitions.Count);
+                for (int repeat = 0; repeat < 8; repeat++)
+                {
+                    CustomPetResult repeated = customPets.ImportGeneratedAssets(projects[0].ProjectDirectory);
+                    if (!repeated.Success) throw new InvalidDataException("Repeated custom-pet import failed: " + repeated.Error);
+                }
+                if (Directory.GetDirectories(projects[0].ProjectDirectory, "assets.backup-*").Length != 3)
+                    throw new InvalidDataException("Custom-pet asset backups exceeded retention bound.");
+                Parallel.For(0, 500, delegate(int index)
+                {
+                    if ((index & 1) == 0)
+                    {
+                        if (customPets.ListProjects().Count != projects.Length) throw new InvalidDataException("Concurrent custom-pet listing drifted.");
+                    }
+                    else if (!customPets.GetProjectInfo(projects[index % projects.Length].ProjectDirectory).Success)
+                        throw new InvalidDataException("Concurrent custom-pet project read failed.");
+                });
+                timer.Stop();
+                log.Add("PASS custom-pet-full-flow-stress projects=24 imported=12 concurrentReads=500 backups=3 ms=" + timer.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
@@ -125,6 +180,13 @@ namespace WorkMatePro
             log.Add("RESULT failures=" + failures + " elapsedMs=" + total.ElapsedMilliseconds);
             File.WriteAllText(Path.Combine(outputRoot, "stress-test.log"), string.Join(Environment.NewLine, log.ToArray()), new UTF8Encoding(false));
             return failures == 0 ? 0 : 1;
+        }
+
+        private static void SaveStressPng(System.Windows.Media.Imaging.BitmapSource source, string path)
+        {
+            System.Windows.Media.Imaging.PngBitmapEncoder encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(source));
+            using (FileStream stream = File.Create(path)) encoder.Save(stream);
         }
     }
 }

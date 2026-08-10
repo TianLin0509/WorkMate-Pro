@@ -777,6 +777,17 @@ namespace WorkMatePro
             ConfigureCustomRoot(customRoot);
         }
 
+        public static void UpsertCustom(PetDefinition definition)
+        {
+            if (definition == null || !definition.IsCustom || string.IsNullOrWhiteSpace(definition.Id)) return;
+            lock (Sync)
+            {
+                custom.RemoveAll(delegate(PetDefinition pet) { return string.Equals(pet.Id, definition.Id, StringComparison.OrdinalIgnoreCase); });
+                custom.Add(definition);
+                custom = custom.OrderBy(delegate(PetDefinition pet) { return pet.Name; }, StringComparer.CurrentCultureIgnoreCase).ToList();
+            }
+        }
+
         public static PetDefinition Find(string id)
         {
             return All.FirstOrDefault(delegate(PetDefinition pet) { return string.Equals(pet.Id, id, StringComparison.OrdinalIgnoreCase); });

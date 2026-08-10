@@ -1060,11 +1060,35 @@ namespace WorkMatePro
                 CustomPetService customPets = new CustomPetService(store.RootDirectory);
                 string customReference = Path.Combine(store.RootDirectory, "custom-pet-reference.png");
                 SavePng(PetAssets.Get("01-cat", "idle"), customReference);
+                CustomPetReferenceValidationResult referenceValidation = CustomPetService.ValidateReferencePhotos(new[] { customReference });
+                List<string> tooManyReferences = new List<string>();
+                for (int referenceIndex = 0; referenceIndex < 4; referenceIndex++)
+                {
+                    string extraReference = Path.Combine(store.RootDirectory, "custom-pet-reference-" + referenceIndex + ".png");
+                    SavePng(PetAssets.Get("01-cat", "idle"), extraReference);
+                    tooManyReferences.Add(extraReference);
+                }
+                Check(referenceValidation.Success && referenceValidation.Photos.Count == 1
+                    && referenceValidation.Photos[0].Width >= 256
+                    && !CustomPetService.ValidateReferencePhotos(tooManyReferences).Success,
+                    "custom-pet-reference-photos-decode-and-enforce-count", log, ref failures);
+                byte[] referenceBytes = File.ReadAllBytes(customReference);
+                string truncatedReference = Path.Combine(store.RootDirectory, "custom-pet-reference-truncated.png");
+                File.WriteAllBytes(truncatedReference, referenceBytes.Take(Math.Max(32, referenceBytes.Length / 2)).ToArray());
+                Check(!CustomPetService.ValidateReferencePhotos(new[] { truncatedReference }).Success,
+                    "custom-pet-reference-rejects-truncated-payload", log, ref failures);
                 CustomPetResult customProject = customPets.CreateProject("团子", "测试猫", new[] { customReference });
                 Check(customProject.Success && File.Exists(customProject.PromptPath) && File.Exists(customProject.WorkflowPath)
                     && File.ReadAllText(customProject.PromptPath, Encoding.UTF8).Contains("1024×1024 RGBA PNG")
-                    && File.ReadAllText(customProject.WorkflowPath, Encoding.UTF8).Contains("generated/"),
+                    && File.ReadAllText(customProject.WorkflowPath, Encoding.UTF8).Contains("原文件名可以不同")
+                    && File.ReadAllText(customProject.WorkflowPath, Encoding.UTF8).Contains(">4</span>"),
                     "custom-pet-project-generates-local-prompt-and-workflow", log, ref failures);
+                CustomPetProjectInfo projectInfo = customPets.GetProjectInfo(customProject.ProjectDirectory);
+                Check(projectInfo.Success && projectInfo.ReferencePaths.Count == 1 && projectInfo.GeneratedCount == 0
+                    && customPets.ListProjects().Any(delegate(CustomPetProjectInfo info) { return info.Id == customProject.PetId; }),
+                    "custom-pet-project-is-resumable-in-app", log, ref failures);
+                Check(!customPets.ImportGeneratedAssets(store.RootDirectory).Success,
+                    "custom-pet-import-rejects-root-or-outside-project", log, ref failures);
                 string customManifestPath = Path.Combine(customProject.ProjectDirectory, "manifest.json");
                 string customManifestJson = File.ReadAllText(customManifestPath, Encoding.UTF8);
                 File.WriteAllText(customManifestPath, customManifestJson.Replace(customProject.PetId, "01-cat"), new UTF8Encoding(false));
@@ -1075,20 +1099,48 @@ namespace WorkMatePro
                 CustomPetResult prematureImport = customPets.ImportGeneratedAssets(customProject.ProjectDirectory);
                 Check(!prematureImport.Success && prematureImport.Error.Contains("idle.png"),
                     "custom-pet-import-rejects-incomplete-four-pose-set", log, ref failures);
-                string generatedRoot = Path.Combine(customProject.ProjectDirectory, "generated");
+                string poseSourceRoot = Path.Combine(store.RootDirectory, "custom-pet-pose-sources");
+                Directory.CreateDirectory(poseSourceRoot);
+                Dictionary<string, string> poseSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (string action in CustomPetService.RequiredActions)
-                    SavePng(PetAssets.Get("01-cat", "idle"), Path.Combine(generatedRoot, action + ".png"));
+                {
+                    string source = Path.Combine(poseSourceRoot, "rendered-" + action + "-arbitrary-name.png");
+                    SavePng(PetAssets.Get("01-cat", "idle"), source);
+                    poseSources[action] = source;
+                }
+                File.WriteAllText(customManifestPath, customManifestJson.Replace(customProject.PetId, "01-cat"), new UTF8Encoding(false));
+                CustomPetResult tamperedPrepare = customPets.PrepareGeneratedAssets(customProject.ProjectDirectory, poseSources);
+                Check(!tamperedPrepare.Success && !Directory.EnumerateFiles(Path.Combine(customProject.ProjectDirectory, "generated")).Any(),
+                    "custom-pet-prepare-validates-manifest-before-swap", log, ref failures);
+                File.WriteAllText(customManifestPath, customManifestJson, new UTF8Encoding(false));
+                CustomPetResult prepared = customPets.PrepareGeneratedAssets(customProject.ProjectDirectory, poseSources);
+                projectInfo = customPets.GetProjectInfo(customProject.ProjectDirectory);
+                Check(prepared.Success && prepared.Validation != null && prepared.Validation.Assets.Count == 4
+                    && projectInfo.GeneratedCount == 4
+                    && CustomPetService.RequiredActions.All(delegate(string action)
+                    {
+                        return File.Exists(Path.Combine(customProject.ProjectDirectory, "generated", action + ".png"));
+                    }),
+                    "custom-pet-arbitrary-pose-files-map-atomically-to-contract", log, ref failures);
+                for (int prepare = 0; prepare < 4; prepare++) customPets.PrepareGeneratedAssets(customProject.ProjectDirectory, poseSources);
+                Check(Directory.GetDirectories(customProject.ProjectDirectory, "generated.backup-*").Length == 2,
+                    "custom-pet-generated-backups-are-bounded", log, ref failures);
                 CustomPetResult customImported = customPets.ImportGeneratedAssets(customProject.ProjectDirectory);
                 PetDefinition importedDefinition = PetCatalog.Find(customProject.PetId);
                 Check(customImported.Success && importedDefinition != null && importedDefinition.IsCustom
+                    && customImported.Validation.Assets.All(delegate(CustomPetAssetSummary asset)
+                    {
+                        return string.Equals(Path.GetDirectoryName(asset.Path), Path.Combine(customProject.ProjectDirectory, "assets"), StringComparison.OrdinalIgnoreCase);
+                    })
                     && PetAssets.Get(customProject.PetId, "happy") != null
                     && !PetAssets.SupportsAnimation(customProject.PetId),
                     "custom-pet-four-pose-import-and-runtime-load", log, ref failures);
-                CustomPetResult customReimported = customPets.ImportGeneratedAssets(customProject.ProjectDirectory);
-                Check(customReimported.Success
-                    && Directory.GetDirectories(customProject.ProjectDirectory, "assets.backup-*").Length == 1
+                CustomPetResult customReimported = null;
+                for (int reimport = 0; reimport < 5; reimport++) customReimported = customPets.ImportGeneratedAssets(customProject.ProjectDirectory);
+                Check(customReimported != null && customReimported.Success
+                    && Directory.GetDirectories(customProject.ProjectDirectory, "assets.backup-*").Length == 3
                     && PetAssets.Get(customProject.PetId, "idle") != null,
-                    "custom-pet-reimport-keeps-recoverable-asset-backup", log, ref failures);
+                    "custom-pet-reimport-keeps-bounded-recoverable-backups", log, ref failures);
                 File.WriteAllText(Path.Combine(customProject.ProjectDirectory, "assets", "happy.png"), "broken", new UTF8Encoding(false));
                 PetCatalog.ConfigureCustomRoot(Path.Combine(store.RootDirectory, "CustomPets"));
                 Check(PetCatalog.Find(customProject.PetId) == null,

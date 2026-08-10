@@ -2,9 +2,9 @@
 
 WorkMate Pro 是一个面向 Windows 10/11 的本地桌面伙伴。它把桌宠、轻量任务管理、专注反馈、环境提醒和实用工具放进一个便携 EXE；默认数据留在本机，不要求账号。
 
-当前稳定版：**v1.24.1** · [下载最新 Release](https://github.com/TianLin0509/WorkMate-Pro/releases/latest)
+当前稳定版：**v1.25.0** · [下载最新 Release](https://github.com/TianLin0509/WorkMate-Pro/releases/latest)
 
-## v1.24 能做什么
+## v1.25 能做什么
 
 - **今日一件事**：从备忘中固定当天唯一优先项，完成、撤销与成长值奖励可逆。
 - **环境共感**：按用户配置的城市获取天气、空气质量、紫外线与降雨提醒；网络失败时保留本地工作上下文。
@@ -12,16 +12,16 @@ WorkMate Pro 是一个面向 Windows 10/11 的本地桌面伙伴。它把桌宠�
 - **智能滚动截图**：先测量真实滚动位移，再用视觉内容对齐相邻画面；流式去重并输出多张接近一屏高度的独立图片，不生成超长图。也支持固定 `@0.30～@0.90` 推进比例。
 - **本地 OCR**：调用 Windows `Windows.Media.Ocr` 识别剪贴板或图片文件，不上传图片。
 - **离线增量更新**：公司电脑无需访问 GitHub；把匹配当前 EXE 哈希的签名差分 ZIP 拖到桌宠身上，验签后只需确认一次即可自动重启完成。更新过程包含备份、原子替换和启动健康检查，失败自动回滚；也保留全量包兜底。
-- **自定义桌宠**：在本机创建照片参考项目，校验并导入 `idle / typing / happy / sleep` 四张透明 PNG。WorkMate 本身不调用外部生成模型。
+- **自定义桌宠四步向导**：在 App 内完成身份与照片、生成指引、四姿态映射、质量校验和启用；支持草稿续办、逐张选择或拖放任意文件名 PNG、失败就地修复建议与原子导入。照片和中间文件只留在本机，WorkMate 本身不调用外部生成模型。
 - **工作陪伴**：进程类别统计、会议/演示避让、久坐提醒、专注仪式、快速记录、文件暂存架和 6 个内置角色。
 
 ## 下载与运行
 
-1. 从 [Releases](https://github.com/TianLin0509/WorkMate-Pro/releases) 下载 `WorkMate-1.24.1.exe` 和 `SHA256SUMS.txt`。
+1. 从 [Releases](https://github.com/TianLin0509/WorkMate-Pro/releases) 下载 `WorkMate-1.25.0.exe` 和 `SHA256SUMS.txt`。
 2. 在 PowerShell 中校验：
 
    ```powershell
-   Get-FileHash .\WorkMate-1.24.1.exe -Algorithm SHA256
+   Get-FileHash .\WorkMate-1.25.0.exe -Algorithm SHA256
    ```
 
 3. 直接双击 EXE。它是便携程序，不需要安装；如果启用“开机启动”，会写入当前用户的 Windows Run 注册表项。
@@ -72,6 +72,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Clean -
 ```powershell
 # WorkMate：确定性压力、串并行隔离自测、损坏数据恢复与事件风暴
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-v124-stress.ps1
+
+# 自定义宠物：真实四步 WPF 页面、AutomationId 与高 DPI 截图
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-custom-pet-e2e.ps1
 
 # 智能滚动截图：算法与核心单测
 python -m pip install -r .\tools\AutoPageCapture\requirements.txt

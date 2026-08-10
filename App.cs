@@ -879,7 +879,6 @@ namespace WorkMatePro
             FrameworkElement.LanguageProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(XmlLanguage.GetLanguage("zh-CN")));
             Store = new DataStore();
             CustomPets = new CustomPetService(Store.RootDirectory);
-            PetCatalog.ReloadCustom();
             Carry = new CarryService(Store);
             MeetingRadar = new OutlookMeetingRadar();
             Tools = new EmbeddedToolManager();
@@ -914,13 +913,27 @@ namespace WorkMatePro
             Tracker.Start();
             if (Store.Data.MeetingRadarEnabled) MeetingRadar.PollIfDue(true);
 
-            if (args.Contains("--capabilities")) OpenWorkbench("capabilities");
+            if (args.Contains("--custom-pet")) OpenWorkbench("custom-pet");
+            else if (args.Contains("--capabilities")) OpenWorkbench("capabilities");
             else if (args.Contains("--settings")) OpenWorkbench("settings");
             else if (args.Contains("--workbench")) OpenWorkbench("memos");
             if (args.Contains("--quick")) OpenQuickCapture();
             if (args.Contains("--hud")) ToggleHud();
             string stateArg = args.FirstOrDefault(delegate(string value) { return value.StartsWith("--state="); });
             if (stateArg != null) Pet.SetPreviewState(stateArg.Substring("--state=".Length));
+
+            string customPetE2EProject;
+            string customPetE2EStep;
+            if (Environment.GetEnvironmentVariable("WORKMATE_CUSTOM_PET_E2E") == "1"
+                && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WORKMATE_TEST_DIR"))
+                && UpdateApplier.TryArgument(args, "--custom-pet-e2e-project", out customPetE2EProject))
+            {
+                int step;
+                if (!UpdateApplier.TryArgument(args, "--custom-pet-e2e-step", out customPetE2EStep)
+                    || !int.TryParse(customPetE2EStep, out step)) step = 1;
+                OpenWorkbench("custom-pet");
+                Workbench.ShowCustomPetProjectForE2E(customPetE2EProject, step);
+            }
 
             if (Store.Data.FirstRun)
             {
@@ -1901,6 +1914,13 @@ namespace WorkMatePro
                 && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WORKMATE_TEST_DIR")))
             {
                 Environment.ExitCode = SelfTest.Run();
+                return;
+            }
+            if (args != null && args.Contains("--custom-pet-e2e-prepare")
+                && Environment.GetEnvironmentVariable("WORKMATE_CUSTOM_PET_E2E") == "1"
+                && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WORKMATE_TEST_DIR")))
+            {
+                Environment.ExitCode = CustomPetE2E.PrepareFixture();
                 return;
             }
             string testInstanceRoot = Environment.GetEnvironmentVariable("WORKMATE_TEST_DIR");

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.26.0 — 2026-08-14
+
+### 移除
+
+- 完整移除智能滚动截图（自动翻页截图）：实现问题过多，不再维护。
+  - 删除 `tools/AutoPageCapture/` 全部源码、测试、桌面 smoke、PyInstaller 构建脚本与启动器。
+  - 删除能力中心的“开始智能滚动截图”卡片，桌宠菜单副标题改为“OCR · 天气 · 离线更新”。
+  - 删除 `App.OpenScrollCapture()` 及 `scrollCaptureActive` 避让状态；截图期间的桌宠隐藏/恢复分支一并移除。
+  - 删除 `EmbeddedToolManager` 的 `ScrollCaptureResource` / `ExtractScrollCapture` / `LaunchScrollCapture` 与 `ScrollCaptureSha256` 生成；EXE 内嵌能力工具由 2 个降为 1 个（仅 OCR 脚本）。
+  - 构建脚本移除 `-RebuildTools` 开关；构建与 CI 不再需要 Python 3.12 及其锁定依赖。
+  - 移除 `third_party/licenses/` 与 THIRD_PARTY_NOTICES 索引表：Python/Tk/Pillow/PyInstaller 仅由该工具引入，现已无第三方可再分发组件。
+
 ## v1.25.0 — 2026-08-10
 
 ### 新增

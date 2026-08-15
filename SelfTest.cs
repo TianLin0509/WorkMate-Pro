@@ -52,14 +52,11 @@ namespace WorkMatePro
                 }
                 Check(imageCount == 24, "embedded-sprite-count", log, ref failures);
                 EmbeddedToolManager embeddedTools = new EmbeddedToolManager();
-                Check(embeddedTools.ResourceExists(EmbeddedToolManager.ScrollCaptureResource)
-                    && embeddedTools.ResourceExists(EmbeddedToolManager.OcrScriptResource),
+                Check(embeddedTools.ResourceExists(EmbeddedToolManager.OcrScriptResource),
                     "embedded-capability-resources", log, ref failures);
-                string extractedCapture = embeddedTools.ExtractScrollCapture();
                 string extractedOcr = embeddedTools.ExtractOcrScript();
-                Check(File.Exists(extractedCapture) && new FileInfo(extractedCapture).Length > 1024 * 1024
-                    && Path.GetFileName(extractedCapture).IndexOf(EmbeddedToolManager.ScrollCaptureSha256.Substring(0, 12), StringComparison.OrdinalIgnoreCase) >= 0
-                    && File.Exists(extractedOcr) && new FileInfo(extractedOcr).Length > 1000,
+                Check(File.Exists(extractedOcr) && new FileInfo(extractedOcr).Length > 1000
+                    && Path.GetFileName(extractedOcr).IndexOf(EmbeddedToolManager.OcrScriptSha256.Substring(0, 12), StringComparison.OrdinalIgnoreCase) >= 0,
                     "embedded-capability-extraction-and-hash", log, ref failures);
 
                 byte[] deltaSource = new byte[1024 * 1024];

@@ -3575,7 +3575,7 @@ namespace WorkMatePro
             Button memos = RowButton("打开备忘录", OutstandingCount() + " 条进行中");
             memos.Click += delegate { Hide(); app.OpenWorkbench("memos"); };
             content.Children.Add(memos);
-            Button capabilities = RowButton("能力中心", "滚动截图 · OCR · 天气");
+            Button capabilities = RowButton("能力中心", "OCR · 天气 · 离线更新");
             capabilities.Click += delegate { Hide(); app.OpenWorkbench("capabilities"); };
             content.Children.Add(capabilities);
             int carried = app.Store.Data.CarryItems.Count;

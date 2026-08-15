@@ -9,12 +9,5 @@ assets/animations/*/*.png
 assets/animations/*/*-chroma.png
 assets/animations/*/frames/frame-report.json
 assets/tools/
-tools/AutoPageCapture/.venv-build/
-tools/AutoPageCapture/build/
-tools/AutoPageCapture/output/
-tools/AutoPageCapture/artifacts/
-tools/AutoPageCapture/**/__pycache__/
-tools/AutoPageCapture/**/*.py[cod]
-AutoPageCapture-crash.log
 *private*.xml
 workmate-update-private.xml

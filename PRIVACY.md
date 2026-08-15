@@ -8,10 +8,10 @@ WorkMate Pro 的默认原则是：能在本机完成的能力不离开本机。
 - 备忘、成长值、分类统计、文件暂存路径、设置和城市名保存在 `%APPDATA%\WorkMatePro\data.json`。
 - 自定义宠物的参考照片、提示词与生成结果保存在 `%APPDATA%\WorkMatePro\CustomPets\`。
 - 剪贴板 OCR 会先把图片副本写入 `%APPDATA%\WorkMatePro\OCR\Inbox\`，识别文本写入 `%APPDATA%\WorkMatePro\OCR\` 并尝试复制回剪贴板。
-- 智能滚动截图只保存用户框选的屏幕像素，输出位置由用户选择。
 - “叼住剪贴板文字 / 链接”只有在用户点击后才读取剪贴板；“识别剪贴板图片”同样需要用户主动操作。
+- WorkMate 不再包含任何自动截屏能力：没有滚动/翻页截图，也不会在后台抓取屏幕像素。
 
-这些数据没有应用层加密；能访问当前 Windows 用户文件的程序也可能读取它们。敏感工作环境应按需要关闭统计、定期清理 OCR/截图输出，并保护 Windows 账户。
+这些数据没有应用层加密；能访问当前 Windows 用户文件的程序也可能读取它们。敏感工作环境应按需要关闭统计、定期清理 OCR 输出，并保护 Windows 账户。
 
 ## 网络请求
 
@@ -32,6 +32,6 @@ WorkMate 的自定义宠物功能只建立本地工作目录，不会代替用�
 1. 在 WorkMate 中关闭“开机启动”，或删除注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 下的 `WorkMatePro` 值。
 2. 退出 WorkMate。
 3. 删除 `%APPDATA%\WorkMatePro\` 与 `%LOCALAPPDATA%\WorkMatePro\`。
-4. 删除自己选择的滚动截图输出目录和下载的 EXE。
+4. 删除下载的 EXE；如果曾用旧版本的滚动截图，再删除当时自己选择的输出目录。
 
 以上操作会永久删除相应本地数据，请先备份需要保留的备忘或自定义宠物素材。

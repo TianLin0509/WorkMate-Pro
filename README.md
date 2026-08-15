@@ -2,14 +2,15 @@
 
 WorkMate Pro 是一个面向 Windows 10/11 的本地桌面伙伴。它把桌宠、轻量任务管理、专注反馈、环境提醒和实用工具放进一个便携 EXE；默认数据留在本机，不要求账号。
 
-当前稳定版：**v1.25.0** · [下载最新 Release](https://github.com/TianLin0509/WorkMate-Pro/releases/latest)
+当前稳定版：**v1.26.0** · [下载最新 Release](https://github.com/TianLin0509/WorkMate-Pro/releases/latest)
 
-## v1.25 能做什么
+## 能做什么
+
+> v1.26.0 完整移除了智能滚动截图（AutoPageCapture）：功能入口、内嵌工具和源码都不再存在。从 v1.25.0 及更早版本升级后会失去该按钮；EXE 也因此从约 40 MB 降到约 21 MB。
 
 - **今日一件事**：从备忘中固定当天唯一优先项，完成、撤销与成长值奖励可逆。
 - **环境共感**：按用户配置的城市获取天气、空气质量、紫外线与降雨提醒；网络失败时保留本地工作上下文。
 - **能量模式**：低能量、稳稳来、精力足三档，联动自主动作频率与主动提醒门槛。
-- **智能滚动截图**：先测量真实滚动位移，再用视觉内容对齐相邻画面；流式去重并输出多张接近一屏高度的独立图片，不生成超长图。也支持固定 `@0.30～@0.90` 推进比例。
 - **本地 OCR**：调用 Windows `Windows.Media.Ocr` 识别剪贴板或图片文件，不上传图片。
 - **离线增量更新**：公司电脑无需访问 GitHub；把匹配当前 EXE 哈希的签名差分 ZIP 拖到桌宠身上，验签后只需确认一次即可自动重启完成。更新过程包含备份、原子替换和启动健康检查，失败自动回滚；也保留全量包兜底。
 - **自定义桌宠四步向导**：在 App 内完成身份与照片、生成指引、四姿态映射、质量校验和启用；支持草稿续办、逐张选择或拖放任意文件名 PNG、失败就地修复建议与原子导入。照片和中间文件只留在本机，WorkMate 本身不调用外部生成模型。
@@ -17,11 +18,11 @@ WorkMate Pro 是一个面向 Windows 10/11 的本地桌面伙伴。它把桌宠�
 
 ## 下载与运行
 
-1. 从 [Releases](https://github.com/TianLin0509/WorkMate-Pro/releases) 下载 `WorkMate-1.25.0.exe` 和 `SHA256SUMS.txt`。
+1. 从 [Releases](https://github.com/TianLin0509/WorkMate-Pro/releases) 下载 `WorkMate-1.26.0.exe` 和 `SHA256SUMS.txt`。
 2. 在 PowerShell 中校验：
 
    ```powershell
-   Get-FileHash .\WorkMate-1.25.0.exe -Algorithm SHA256
+   Get-FileHash .\WorkMate-1.26.0.exe -Algorithm SHA256
    ```
 
 3. 直接双击 EXE。它是便携程序，不需要安装；如果启用“开机启动”，会写入当前用户的 Windows Run 注册表项。
@@ -51,21 +52,21 @@ v1.24.0 是第一版带内置更新器的公开基线。从更早的本地版本
 - 解压出的内嵌工具：`%LOCALAPPDATA%\WorkMatePro\Tools\`
 - 离线更新收件箱、暂存与备份：`%LOCALAPPDATA%\WorkMatePro\Updates\`
 - 唯一内置联网能力是 Open-Meteo 天气/空气质量查询；会向其 HTTPS API 发送用户填写的城市名及查询坐标。
-- 没有账号、广告 SDK、遥测或自动上传。滚动截图与 OCR 均在本机处理。
+- 没有账号、广告 SDK、遥测或自动上传。OCR 在本机处理。
 
 完整说明见 [PRIVACY.md](PRIVACY.md)。
 
 ## 从源码构建
 
-要求：64 位 Windows 10/11、Windows PowerShell 5.1+、Python 3.12，以及系统自带的 .NET Framework C# 编译器。首次重建截图工具需要联网安装已锁定版本的 Python 构建依赖。
+要求：64 位 Windows 10/11、Windows PowerShell 5.1+，以及系统自带的 .NET Framework C# 编译器。构建全程离线，不需要 Python 或其他外部工具链。
 
 ```powershell
 git clone https://github.com/TianLin0509/WorkMate-Pro.git
 Set-Location .\WorkMate-Pro
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Clean -RebuildTools
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Clean
 ```
 
-输出：`dist\WorkMate.exe`。构建脚本会先检查 300 张逐帧素材，再从 `tools\AutoPageCapture\` 构建截图工具、计算内嵌资源哈希并编译单文件 WorkMate。
+输出：`dist\WorkMate.exe`。构建脚本会先检查 300 张逐帧素材，再计算内嵌资源哈希并编译单文件 WorkMate。
 
 ## 测试
 
@@ -75,13 +76,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-v124-stress
 
 # 自定义宠物：真实四步 WPF 页面、AutomationId 与高 DPI 截图
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-custom-pet-e2e.ps1
-
-# 智能滚动截图：算法与核心单测
-python -m pip install -r .\tools\AutoPageCapture\requirements.txt
-python -m unittest discover -s .\tools\AutoPageCapture\tests -v
-
-# 可选：真实 Windows 截屏 + 滚轮输入 smoke（会短暂打开并关闭自己的测试窗口）
-python .\tools\AutoPageCapture\tests\desktop_smoke.py
 ```
 
 发布维护者可用 `scripts\New-UpdatePackage.ps1` 为精确旧版 EXE 生成 MSDelta 差分包、全量兜底包和签名目录。发布私钥只保存在发布机 `C:\VibeData\WorkMatePro\Signing\`，不得提交仓库，并应另做加密离线备份；私钥丢失后，已安装客户端不会信任新密钥签出的增量包，只能由用户手动全量换版建立新的信任根。
@@ -90,6 +84,6 @@ python .\tools\AutoPageCapture\tests\desktop_smoke.py
 
 ## 权利与第三方组件
 
-本仓库公开源码用于透明审查和可复建发布，**当前未授予开源再使用许可**；详情见 [RIGHTS.md](RIGHTS.md)。内嵌 Python/Tk/Pillow/PyInstaller 等组件按各自许可证分发，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+本仓库公开源码用于透明审查和可复建发布，**当前未授予开源再使用许可**；详情见 [RIGHTS.md](RIGHTS.md)。当前发布不再随包分发第三方可再分发组件，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。

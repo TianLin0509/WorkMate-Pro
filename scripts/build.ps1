@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
-    [switch]$Clean,
-    [switch]$RebuildTools
+    [switch]$Clean
 )
 
 $ErrorActionPreference = 'Stop'
@@ -80,25 +79,12 @@ foreach ($animatedPetId in $animatedPetIds) {
     }
 }
 
-$scrollCaptureProject = Join-Path $project 'tools\AutoPageCapture'
-$scrollCaptureBuild = Join-Path $scrollCaptureProject 'build.ps1'
-$scrollCaptureTool = Join-Path $scrollCaptureProject 'output\AutoPageCapture.exe'
 $ocrScriptTool = Join-Path $project 'tools\workmate-ocr.ps1'
-if ($RebuildTools -or -not (Test-Path -LiteralPath $scrollCaptureTool)) {
-    if (-not (Test-Path -LiteralPath $scrollCaptureBuild)) { throw "Tool build script not found: $scrollCaptureBuild" }
-    Write-Host 'AutoPageCapture build begin'
-    & $scrollCaptureBuild
-    Write-Host 'AutoPageCapture build end'
-}
-if (-not (Test-Path -LiteralPath $scrollCaptureTool)) { throw "Tool not found: $scrollCaptureTool" }
 if (-not (Test-Path -LiteralPath $ocrScriptTool)) { throw "Tool not found: $ocrScriptTool" }
-$arguments += ('/resource:' + (Quote-CscPath $scrollCaptureTool) + ',WorkMate.Tools.AutoPageCapture.exe')
 $arguments += ('/resource:' + (Quote-CscPath $ocrScriptTool) + ',WorkMate.Tools.workmate-ocr.ps1')
 
-# The embedded helper is rebuilt from source and can have a different PE hash across
-# PyInstaller/toolchain revisions. Generate the expected hashes into the same build
-# so runtime extraction still verifies the exact resources that were embedded.
-$scrollCaptureHash = (Get-FileHash -LiteralPath $scrollCaptureTool -Algorithm SHA256).Hash
+# 内嵌能力工具随源码一起变化。把期望哈希生成到同一次构建里，
+# 运行时解压才校验的正是本次实际嵌入的资源。
 $ocrScriptHash = (Get-FileHash -LiteralPath $ocrScriptTool -Algorithm SHA256).Hash
 $generatedHashSource = Join-Path $artifactDir 'EmbeddedToolHashes.g.cs'
 $generatedHashCode = @"
@@ -106,7 +92,6 @@ namespace WorkMatePro
 {
     public sealed partial class EmbeddedToolManager
     {
-        public const string ScrollCaptureSha256 = "$scrollCaptureHash";
         public const string OcrScriptSha256 = "$ocrScriptHash";
     }
 }
@@ -130,7 +115,7 @@ $logLines = @(
     "Sources: $($sources.Count)",
     "Embedded sprites: $($petIds.Count * $actions.Count)",
     "Embedded animation frames: $($animatedPetIds.Count * $animationNames.Count * 25)",
-    'Embedded capability tools: 2',
+    'Embedded capability tools: 1',
     $output
 )
 [System.IO.File]::WriteAllLines((Join-Path $artifactDir 'build.log'), [string[]]$logLines, [System.Text.UTF8Encoding]::new($false))

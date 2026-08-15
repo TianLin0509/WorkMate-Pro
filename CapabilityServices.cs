@@ -16,7 +16,6 @@ namespace WorkMatePro
     /// <summary>把随单 EXE 发布的能力工具按内容哈希解压，避免覆盖正在运行的旧版本。</summary>
     public sealed partial class EmbeddedToolManager
     {
-        public const string ScrollCaptureResource = "WorkMate.Tools.AutoPageCapture.exe";
         public const string OcrScriptResource = "WorkMate.Tools.workmate-ocr.ps1";
 
         public string ToolRoot { get; private set; }
@@ -35,26 +34,9 @@ namespace WorkMatePro
                 return stream != null;
         }
 
-        public string ExtractScrollCapture()
-        {
-            return ExtractResource(ScrollCaptureResource, "AutoPageCapture.exe", ScrollCaptureSha256);
-        }
-
         public string ExtractOcrScript()
         {
             return ExtractResource(OcrScriptResource, "workmate-ocr.ps1", OcrScriptSha256);
-        }
-
-        public Process LaunchScrollCapture()
-        {
-            string path = ExtractScrollCapture();
-            ProcessStartInfo start = new ProcessStartInfo
-            {
-                FileName = path,
-                WorkingDirectory = Path.GetDirectoryName(path),
-                UseShellExecute = true
-            };
-            return Process.Start(start);
         }
 
         private string ExtractResource(string resourceName, string fileName, string expectedHash)

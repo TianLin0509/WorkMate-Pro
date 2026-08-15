@@ -841,7 +841,6 @@ namespace WorkMatePro
         private BehaviorState prevBehavior = BehaviorState.Idle;
         private string lastMeetingAlertId = "";
         private bool pendingWorkBreakReminder;
-        private bool scrollCaptureActive;
         private readonly ProactiveNoticeQueue pendingProactiveNotices = new ProactiveNoticeQueue();
         private AmbientSnapshot latestAmbient;
         private bool ambientPollInFlight;
@@ -1160,7 +1159,7 @@ namespace WorkMatePro
             if (!Engine.LongSittingEnabled) pendingWorkBreakReminder = false;
             EngineOutput output = Engine.Tick(sample);
             Pet.ApplyBehavior(output);
-            Pet.SetRetreat(scrollCaptureActive || (Store.Data.PresentationGuardEnabled && Guard.ShouldRetreat) || DemoModeActive);
+            Pet.SetRetreat((Store.Data.PresentationGuardEnabled && Guard.ShouldRetreat) || DemoModeActive);
 
             // 心流记账（不触发工作奖励，单独累计）
             if (output.FlowActive && engineTicks % 4 == 0) Store.AddFlowSeconds(2);
@@ -1402,46 +1401,6 @@ namespace WorkMatePro
         {
             if (Workbench == null) Workbench = new WorkbenchWindow(this);
             Workbench.ShowPage(page);
-        }
-
-        public void OpenScrollCapture()
-        {
-            try
-            {
-                scrollCaptureActive = true;
-                if (Workbench != null) Workbench.Hide();
-                if (QuickCapture != null) QuickCapture.Hide();
-                if (Pet != null) { Pet.SetRetreat(true); Pet.Hide(); }
-                Process process = Tools.LaunchScrollCapture();
-                if (process == null) throw new InvalidOperationException("滚动截图工具未能启动。");
-                process.Exited += delegate
-                {
-                    try
-                    {
-                        Dispatcher.BeginInvoke(new Action(delegate
-                        {
-                            if (IsExiting || Pet == null) return;
-                            scrollCaptureActive = false;
-                            Pet.SetRetreat((Store.Data.PresentationGuardEnabled && Guard.ShouldRetreat) || DemoModeActive);
-                            Pet.RestoreForActivation();
-                            Pet.EventToast("滚动截图已结束，我回来啦");
-                        }));
-                    }
-                    catch { }
-                    try { process.Dispose(); } catch { }
-                };
-                process.EnableRaisingEvents = true;
-            }
-            catch (Exception ex)
-            {
-                scrollCaptureActive = false;
-                if (Pet != null)
-                {
-                    Pet.SetRetreat((Store.Data.PresentationGuardEnabled && Guard.ShouldRetreat) || DemoModeActive);
-                    Pet.RestoreForActivation();
-                    Pet.EventToast("滚动截图启动失败：" + Formatters.Truncate(ex.Message, 42));
-                }
-            }
         }
 
         public void RecognizeClipboardImage(Action<OcrResponse> callback)
@@ -1739,7 +1698,7 @@ namespace WorkMatePro
             int openMemoCount = Store.Data.Memos.Count(delegate(MemoItem memo) { return !memo.IsDone; });
             if (!DailyPriorityPromptPolicy.CanPrompt(now, Store.Data.LastPriorityPromptDate, anchor != null, openMemoCount,
                 output.State, output.FlowActive, Pet.QuietModeActive, Pet.FocusRitualActive,
-                Guard.ShouldRetreat || scrollCaptureActive || Pet.RetreatActive, DemoModeActive, Pet.DockActive)) return;
+                Guard.ShouldRetreat || Pet.RetreatActive, DemoModeActive, Pet.DockActive)) return;
             Store.Data.LastPriorityPromptDate = now.ToString("yyyy-MM-dd");
             Store.Save();
             Pet.ResumeToast("今天先圈出一件最重要的事吧");
@@ -1749,7 +1708,7 @@ namespace WorkMatePro
         private bool CanPresentProactive(EngineOutput output)
         {
             return ProactivePresentationPolicy.CanPresent(output.State, output.FlowActive, Pet.QuietModeActive,
-                Pet.FocusRitualActive, Guard.ShouldRetreat || scrollCaptureActive || Pet.RetreatActive,
+                Pet.FocusRitualActive, Guard.ShouldRetreat || Pet.RetreatActive,
                 DemoModeActive, Pet.DockActive);
         }
 
@@ -1770,7 +1729,7 @@ namespace WorkMatePro
         private bool CanPresentWorkBreak(EngineOutput output)
         {
             return WorkBreakPresentationPolicy.CanPresent(output.State, output.FlowActive, Pet.QuietModeActive,
-                Pet.FocusRitualActive, Guard.ShouldRetreat || scrollCaptureActive, DemoModeActive);
+                Pet.FocusRitualActive, Guard.ShouldRetreat, DemoModeActive);
         }
 
         private void PresentWorkBreakReminder()

@@ -755,15 +755,6 @@ namespace WorkMatePro
             StackPanel content = new StackPanel { Margin = new Thickness(0, 0, 6, 0) };
             StackPanel utilityContent = new StackPanel();
 
-            StackPanel captureActions = new StackPanel { Orientation = Orientation.Horizontal };
-            Button capture = Theme.PrimaryButton("开始智能滚动截图");
-            capture.Click += delegate { app.OpenScrollCapture(); };
-            captureActions.Children.Add(capture);
-            TextBlock captureHint = Theme.Text("默认视觉对齐；也支持 @0.30–@0.90 固定比例", 10.5, Theme.Muted, FontWeights.Normal);
-            captureHint.Margin = new Thickness(14, 0, 0, 0);
-            captureActions.Children.Add(captureHint);
-            utilityContent.Children.Add(CapabilityCard("智能滚动截图", "自动试滚并测量真实位移，按视觉内容对齐相邻画面，输出多张独立图片；尽量减少重复信息，同时保留少量安全上下文避免漏行。", "本地 · 已集成", captureActions));
-
             TextBlock updateStatus = Theme.Text(
                 "当前版本 v" + app.Updates.CurrentVersion + "。默认只检查本地更新收件箱、程序目录和下载目录；不会在后台访问 GitHub。",
                 10.5, Theme.Muted, FontWeights.Normal);

@@ -2,7 +2,7 @@
 
 ## Supported version
 
-当前只维护最新 GitHub Release（现为 v1.25.x）。旧版本发现安全问题后应先升级再复现。
+当前只维护最新 GitHub Release（现为 v1.26.x）。旧版本发现安全问题后应先升级再复现。
 
 ## Reporting a vulnerability
 

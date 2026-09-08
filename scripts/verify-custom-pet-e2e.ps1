@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$ExePath,
     [string]$OutputDirectory
@@ -42,7 +42,7 @@ try {
     foreach ($step in 1..4) {
         $testProcess = Start-Process -FilePath $ExePath -ArgumentList @(
             '--custom-pet', '--custom-pet-e2e-project', ('"' + $projectPath + '"'), '--custom-pet-e2e-step', $step
-        ) -PassThru
+        ) -WindowStyle Hidden -PassThru
         try {
             try { $null = $testProcess.WaitForInputIdle(15000) } catch { }
             $deadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -142,7 +142,7 @@ try {
     [System.IO.File]::WriteAllText($brokenPose, 'not-a-png', [System.Text.UTF8Encoding]::new($false))
     $failureProcess = Start-Process -FilePath $ExePath -ArgumentList @(
         '--custom-pet', '--custom-pet-e2e-project', ('"' + $projectPath + '"'), '--custom-pet-e2e-step', 3
-    ) -PassThru
+    ) -WindowStyle Hidden -PassThru
     try {
         try { $null = $failureProcess.WaitForInputIdle(15000) } catch { }
         $failureDeadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -156,7 +156,26 @@ try {
         $nextCondition = [System.Windows.Automation.PropertyCondition]::new(
             [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
             'custom-pet-next')
-        $nextElement = $failureRoot.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
+        # This process owns both the pet and workbench. MainWindowHandle can
+        # initially select the pet; bind to the actual action in this process.
+        $processCondition = [System.Windows.Automation.PropertyCondition]::new(
+            [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $failureProcess.Id)
+        do {
+            $nextElement = $null
+            $processWindows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+                [System.Windows.Automation.TreeScope]::Children, $processCondition)
+            foreach ($candidateWindow in $processWindows) {
+                $candidateNext = $candidateWindow.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
+                if ($null -ne $candidateNext -and $candidateNext.Current.IsEnabled) {
+                    $failureRoot = $candidateWindow
+                    $nextElement = $candidateNext
+                    break
+                }
+            }
+            if ($null -ne $nextElement -and $nextElement.Current.IsEnabled) { break }
+            if ($failureProcess.HasExited) { throw 'Recovery E2E exited before its next action became ready.' }
+            Start-Sleep -Milliseconds 200
+        } while ([DateTime]::UtcNow -lt $failureDeadline)
         if ($null -eq $nextElement -or -not $nextElement.Current.IsEnabled) { throw 'Recovery E2E next action is unavailable.' }
         $invoke = [System.Windows.Automation.InvokePattern]$nextElement.GetCurrentPattern(
             [System.Windows.Automation.InvokePattern]::Pattern)

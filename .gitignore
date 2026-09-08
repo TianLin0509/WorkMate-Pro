@@ -11,3 +11,6 @@ assets/animations/*/frames/frame-report.json
 assets/tools/
 *private*.xml
 workmate-update-private.xml
+
+__pycache__/
+*.pyc

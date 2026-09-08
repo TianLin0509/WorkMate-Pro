@@ -3,3 +3,5 @@
 *.png binary
 *.ico binary
 *.exe binary
+
+.githooks/* text eol=lf

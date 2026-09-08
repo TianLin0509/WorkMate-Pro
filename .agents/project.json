@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "WorkMate Pro",
+  "trunk": "main",
+  "protectedBranches": ["main", "master", "develop"],
+  "test": [["python", "-X", "utf8", "scripts/run_checks.py"]],
+  "testEnv": {"PYTHONUTF8": "1"},
+  "versionFiles": [],
+  "versionBump": [],
+  "afterMerge": [],
+  "contracts": {"author": ".agents/AUTHOR.md", "merger": ".agents/MERGER.md"},
+  "worktreeRoot": "../20260908-WorkMate-Pro-worktrees",
+  "worktreeHint": "Windows desktop required. Build in each checkout; never share dist/artifacts or user data. Run python -X utf8 scripts/run_checks.py.",
+  "notes": [
+    "Baseline: GitHub v1.26.0 b4398a57c0876984f3d6408cae5361fe516179b3; project-prep v0.1.0 441d2c732a7c3718acd5b499dccf3e9c218b2925.",
+    "Versioning remains release-owned through AssemblyInfo.cs, app.manifest and release documentation. No npm version helper applies.",
+    "Local merges only. Remote push, signed update packages and GitHub releases require separate authorization.",
+    "The full local gate includes default 12 sequential and 6 parallel self-tests and real WPF custom-pet UI checks; CI currently runs a smaller suite."
+  ]
+}

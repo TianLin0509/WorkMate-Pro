@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ExePath,
     [string]$OutputDirectory,
     [int]$SequentialSelfTests = 12,
@@ -23,7 +23,7 @@ function New-IsolatedRoot([string]$Prefix) {
 
 function Start-IsolatedAndWait([string]$Argument, [string]$Root) {
     $env:WORKMATE_TEST_DIR = $Root
-    try { return Start-Process -FilePath $ExePath -ArgumentList $Argument -PassThru -Wait }
+    try { return Start-Process -FilePath $ExePath -ArgumentList $Argument -WindowStyle Hidden -PassThru -Wait }
     finally { Remove-Item Env:WORKMATE_TEST_DIR -ErrorAction SilentlyContinue }
 }
 
@@ -53,7 +53,7 @@ $parallel = @()
 for ($i = 0; $i -lt $ParallelSelfTests; $i++) {
     $root = New-IsolatedRoot ('selftest-par-' + $i.ToString('00'))
     $env:WORKMATE_TEST_DIR = $root
-    $process = Start-Process -FilePath $ExePath -ArgumentList '--self-test' -PassThru
+    $process = Start-Process -FilePath $ExePath -ArgumentList '--self-test' -WindowStyle Hidden -PassThru
     $parallel += [pscustomobject]@{ Index = $i; Root = $root; Process = $process }
 }
 Remove-Item Env:WORKMATE_TEST_DIR -ErrorAction SilentlyContinue
@@ -80,7 +80,7 @@ Write-Host 'PASS corrupt-json-is-backed-up-and-recovers'
 
 $stormRoot = New-IsolatedRoot 'runtime-storm'
 $env:WORKMATE_TEST_DIR = $stormRoot
-$main = Start-Process -FilePath $ExePath -ArgumentList '--settings' -PassThru
+$main = Start-Process -FilePath $ExePath -ArgumentList '--settings' -WindowStyle Hidden -PassThru
 try {
     Start-Sleep -Seconds 3
     if ($main.HasExited) { throw 'Isolated runtime exited during startup.' }

@@ -56,6 +56,12 @@ v1.24.0 是第一版带内置更新器的公开基线。从更早的本地版本
 
 完整说明见 [PRIVACY.md](PRIVACY.md)。
 
+## 并行开发入口
+
+本项目使用 project-prep v0.1.0 的本地工作流。实现位读取 `.agents/AUTHOR.md`，独立合并位读取 `.agents/MERGER.md`，项目配置为 `.agents/project.json`。首次克隆后执行 `git config core.hooksPath .githooks`；主目录保留给审查合并，开发在独立 worktree 进行。
+
+完整本地闸门：`python -X utf8 scripts/run_checks.py`。除下述构建环境，还需 Python 3.10+、Git 2.38+ 和可用 Windows 桌面。它运行全部现有测试入口，详见 `.agents/TESTING.md`。CI 的缩小档不替代此闸门；普通本地合并不抬产品版本或发布。
+
 ## 从源码构建
 
 要求：64 位 Windows 10/11、Windows PowerShell 5.1+，以及系统自带的 .NET Framework C# 编译器。构建全程离线，不需要 Python 或其他外部工具链。

@@ -177,12 +177,44 @@ namespace WorkMatePro
         }
     }
 
+    internal static class AtomicFileReplacement
+    {
+        internal static int Win32Code(Exception error)
+        {
+            return (error.HResult & unchecked((int)0xffff0000)) == unchecked((int)0x80070000)
+                ? error.HResult & 0xffff : -1;
+        }
+
+        internal static void Execute(Action replace, Action<int> delay)
+        {
+            for (int attempt = 0; ; attempt++)
+            {
+                try { replace(); return; }
+                catch (IOException ex)
+                {
+                    int code = Win32Code(ex);
+                    // ReplaceFileW: 32/33 and 1175 retain the original file names.
+                    // 1176/1177 may partially move files; never retry those states.
+                    if ((code != 32 && code != 33 && code != 1175) || attempt >= 4) throw;
+                    delay(25 << attempt); // Four bounded waits: 25+50+100+200 ms.
+                }
+            }
+        }
+
+        internal static void Replace(string source, string target, string backup)
+        {
+            Execute(delegate { File.Replace(source, target, backup, true); }, System.Threading.Thread.Sleep);
+        }
+    }
+
     public sealed class DataStore
     {
         private readonly object sync = new object();
         private readonly JavaScriptSerializer serializer = new JavaScriptSerializer();
         private bool normalizeRequiresSave;
         private bool preserveBackup;
+        private bool saveRequiresRecovery;
+        internal Action<string, string, string> ReplaceFile = AtomicFileReplacement.Replace;
         public string StorageNotice { get; private set; }
         public event Action<string> StorageFailed;
         public event Action StatisticsReset;
@@ -211,6 +243,7 @@ namespace WorkMatePro
                 Data = null;
                 StorageNotice = "";
                 preserveBackup = false;
+                saveRequiresRecovery = false;
                 try
                 {
                     if (File.Exists(DataPath))
@@ -384,7 +417,9 @@ namespace WorkMatePro
         {
             lock (sync)
             {
+                if (saveRequiresRecovery) throw new IOException(StorageNotice);
                 string temp = DataPath + ".tmp-" + Guid.NewGuid().ToString("N");
+                bool keepRecoveryTemp = false;
                 try
                 {
                     Directory.CreateDirectory(RootDirectory);
@@ -399,19 +434,27 @@ namespace WorkMatePro
                     if (File.Exists(DataPath))
                     {
                         string backup = preserveBackup ? null : DataPath + ".bak";
-                        File.Replace(temp, DataPath, backup, true);
+                        ReplaceFile(temp, DataPath, backup);
                     }
                     else File.Move(temp, DataPath);
                     preserveBackup = false;
                 }
                 catch (Exception ex)
                 {
-                    StorageNotice = "保存失败，原数据未替换。本次修改尚未保存：" + ex.Message;
+                    int code = AtomicFileReplacement.Win32Code(ex);
+                    keepRecoveryTemp = code == 1176 || code == 1177;
+                    StorageNotice = "保存失败，本次修改未确认保存（错误码 " + code + "）：" + ex.Message;
+                    if (keepRecoveryTemp)
+                    {
+                        saveRequiresRecovery = true;
+                        StorageNotice += "；替换可能部分完成，请检查原文件与备份，不要继续覆盖。";
+                        if (File.Exists(temp)) StorageNotice += " 临时恢复文件：" + temp;
+                    }
                     Action<string> failed = StorageFailed;
                     if (failed != null) failed(StorageNotice);
                     throw new IOException(StorageNotice, ex);
                 }
-                finally { try { if (File.Exists(temp)) File.Delete(temp); } catch { } }
+                finally { try { if (!keepRecoveryTemp && File.Exists(temp)) File.Delete(temp); } catch { } }
             }
             RaiseChanged();
         }

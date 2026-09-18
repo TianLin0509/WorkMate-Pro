@@ -173,6 +173,67 @@ namespace WorkMatePro
                 Check(dragging.Left == -100 && dragging.Top == 50 && releasedPlacement.Left == 0 && releasedPlacement.Top == 0
                     && releasedPlacement.Width == 640 && releasedPlacement.Height == 460,
                     "workbench-negative-monitor-crossing-unclamped-until-release", log, ref failures);
+                foreach (int code in new[] { 32, 33, 1175 })
+                {
+                    int attempts = 0, waits = 0;
+                    AtomicFileReplacement.Execute(delegate
+                    {
+                        if (++attempts < 3) throw new IOException("transient fixture", unchecked((int)0x80070000) | code);
+                    }, delay => waits += delay);
+                    Check(attempts == 3 && waits == 75, "atomic-retry-transient-code-" + code, log, ref failures);
+                    attempts = waits = 0; failed = false;
+                    try
+                    {
+                        AtomicFileReplacement.Execute(delegate { attempts++; throw new IOException("permanent fixture", unchecked((int)0x80070000) | code); }, delay => waits += delay);
+                    }
+                    catch (IOException) { failed = true; }
+                    Check(failed && attempts == 5 && waits == 375, "atomic-retry-bounded-code-" + code, log, ref failures);
+                }
+                foreach (int code in new[] { 5, 1176, 1177 })
+                {
+                    int attempts = 0, waits = 0; failed = false;
+                    try
+                    {
+                        AtomicFileReplacement.Execute(delegate { attempts++; throw new IOException("nonretryable fixture", unchecked((int)0x80070000) | code); }, delay => waits++);
+                    }
+                    catch (IOException) { failed = true; }
+                    Check(failed && attempts == 1 && waits == 0, "atomic-no-retry-code-" + code, log, ref failures);
+                }
+                string atomicTarget = Path.Combine(root, "atomic-target.json");
+                string atomicSource = Path.Combine(root, "atomic-source.json");
+                string atomicBackup = Path.Combine(root, "atomic-backup.json");
+                File.WriteAllText(atomicTarget, "original"); File.WriteAllText(atomicSource, "replacement");
+                int actualAttempts = 0;
+                FileStream lease = new FileStream(atomicTarget, FileMode.Open, FileAccess.Read, FileShare.Read);
+                try
+                {
+                    AtomicFileReplacement.Execute(delegate { actualAttempts++; File.Replace(atomicSource, atomicTarget, atomicBackup, true); },
+                        delegate { if (lease != null) { lease.Dispose(); lease = null; } });
+                }
+                finally { if (lease != null) lease.Dispose(); }
+                Check(actualAttempts >= 2 && actualAttempts <= 5 && File.ReadAllText(atomicTarget) == "replacement"
+                    && File.ReadAllText(atomicBackup) == "original" && !File.Exists(atomicSource),
+                    "atomic-real-sharing-conflict-releases-and-replaces", log, ref failures);
+                foreach (int code in new[] { 1176, 1177 })
+                {
+                    string partialRoot = Path.Combine(root, "partial-" + code);
+                    Environment.SetEnvironmentVariable("WORKMATE_TEST_DIR", partialRoot);
+                    DataStore partial = new DataStore(); partial.Save(); partial.Save();
+                    string goodBackup = File.ReadAllText(partial.DataPath + ".bak");
+                    int calls = 0, visibleFailures = 0;
+                    partial.StorageFailed += message => visibleFailures++;
+                    partial.ReplaceFile = delegate(string source, string target, string previous)
+                    {
+                        calls++;
+                        File.Move(target, target + ".partial-original");
+                        throw new IOException("partial replacement fixture", unchecked((int)0x80070000) | code);
+                    };
+                    try { partial.Save(); } catch (IOException) { }
+                    try { partial.Save(); } catch (IOException) { }
+                    Check(calls == 1 && visibleFailures == 1 && Directory.GetFiles(partialRoot, "data.json.tmp-*").Length == 1
+                        && File.Exists(partial.DataPath + ".partial-original") && File.ReadAllText(partial.DataPath + ".bak") == goodBackup
+                        && partial.StorageNotice.Contains("部分完成"), "atomic-partial-state-retains-evidence-and-blocks-later-save-" + code, log, ref failures);
+                }
             }
             finally
             {

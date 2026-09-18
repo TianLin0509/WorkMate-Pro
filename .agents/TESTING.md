@@ -17,6 +17,7 @@ Windows 10/11 x64、Windows PowerShell 5.1、系统 .NET Framework C# 编译器�
 各套件在独立 PowerShell 进程执行，失败返回非零，运行器立即停止。构建和测试产物均应被 Git 忽略。
 旧 .NET 文件 API 仍受路径长度约束，完整运行器在用户可写临时目录分配唯一短数据根；可用 `WORKMATE_TEST_BASE` 指定另一个可写短根。每次运行的 `artifacts/.../test-roots.json` 和各套件 `data-root.txt` 记录数据根与 checkout 映射。源码、EXE、截图和报告仍属于当前 worktree，绝不共享 dist/artifacts，也不自动删除失败现场。标准长 Author worktree 必须运行完整闸门。
 新增可靠性用例由每轮 SelfTest 调用 `ReliabilityChecks`：主备恢复、锁定/只读保存、统计暂停/清空/奖励、缺省授权及升级配置、日历过滤与时钟回绕。工作台交互由 `scripts/verify-workbench-e2e.ps1` 验证草稿、筛选、跨页、保存和小可用区。
+原子保存对 HRESULT_FROM_WIN32 的 32、33、1175 执行同一个 File.Replace 的有界重试（最多5次，共等待375ms）；5及其他错误不重试。1176/1177可能部分移动文件，保留唯一临时文件并停止后续保存直到重新加载，不能声称原文件一定未变。依据 [ReplaceFileW 错误状态](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-replacefilew)。确定性用例覆盖每个白名单错误的瞬态/永久失败、非白名单立即失败、真实锁在重试边界释放后的原子替换，以及部分状态的恢复证据。
 CI 当前只做构建与 2 次串行/2 次并行自测，不等于完整本地闸门。
 
 2026-09-08 初始化实测：完整命令通过，128.14 秒，其中压力与自测 88.95 秒、UI 36.12 秒。每轮 SelfTest 有 224 条 PASS；300 帧素材 0 问题，四步导航/导入/错误恢复均通过。耗时是本机该次测量，不是固定预算保证。

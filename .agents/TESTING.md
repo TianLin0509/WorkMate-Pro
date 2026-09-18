@@ -27,6 +27,8 @@ CI 当前只做构建与 2 次串行/2 次并行自测，不等于完整本地�
 必须先在本 checkout 构建 `dist/WorkMate.exe`，不要指向旧安装 EXE。
 `WORKMATE_TEST_DIR` 同时隔离 Store、事件通道、实例互斥和更新根。仅关闭验证脚本自己启动的进程。
 UI 测试需要可用 Windows 桌面；截图非空与 UI 自动化通过不等于全部视觉效果已人工验收。
+为避免测试弹窗干扰正在工作的用户，本轮复核在独立、不可见的 Windows desktop 上执行，使用 `CreateDesktopW` / `CreateProcessW.lpDesktop`，不调用 `SwitchDesktop`。隔离启动器为审阅位 ignored artifacts 工具，不改变产品启动路径。
+当且仅当 `WORKMATE_TEST_DIR` 非空且 `WORKMATE_TEST_SOFTWARE_RENDERING=1` 时，程序在 WPF 初始化前启用 `SoftwareOnly`，供不可见 desktop 的实际窗口截图验证；正常生产运行不受影响。工作台与四步向导均保留截图非空门禁，不能把离屏黑图当成视觉通过。该证据覆盖软件渲染，不代表硬件加速或所有混合 DPI 显示环境均已验证。
 普通运行会读写用户 APPDATA，测试不可省略隔离变量。
 
 ## 版本与发布

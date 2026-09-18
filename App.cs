@@ -1844,6 +1844,9 @@ namespace WorkMatePro
         [STAThread]
         public static void Main(string[] args)
         {
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WORKMATE_TEST_DIR"))
+                && Environment.GetEnvironmentVariable("WORKMATE_TEST_SOFTWARE_RENDERING") == "1")
+                System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
             if (args != null && args.Length > 0 && args[0] == "--apply-update")
             {
                 Environment.ExitCode = UpdateApplier.Run(args);

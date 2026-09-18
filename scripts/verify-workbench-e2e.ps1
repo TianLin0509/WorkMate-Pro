@@ -121,6 +121,13 @@ try {
                 finally { $graphics.ReleaseHdc($dc) }
                 $screenshot = Join-Path $OutputDirectory ('workbench-' + $tag + '.png')
                 $bitmap.Save($screenshot, [Drawing.Imaging.ImageFormat]::Png)
+                $colors = [System.Collections.Generic.HashSet[int]]::new()
+                $strideX = [Math]::Max(1, [int]($bitmap.Width / 40))
+                $strideY = [Math]::Max(1, [int]($bitmap.Height / 30))
+                for ($x = 0; $x -lt $bitmap.Width; $x += $strideX) {
+                    for ($y = 0; $y -lt $bitmap.Height; $y += $strideY) { $null = $colors.Add($bitmap.GetPixel($x,$y).ToArgb()) }
+                }
+                if ($colors.Count -lt 12) { throw "Workbench screenshot blank: colors=$($colors.Count) path=$screenshot" }
             } finally { $graphics.Dispose(); $bitmap.Dispose() }
             Invoke-Control $window 'memo-add'
             Wait-Draft $window ''

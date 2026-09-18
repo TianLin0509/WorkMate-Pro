@@ -4,6 +4,8 @@ WorkMate Pro 是一个面向 Windows 10/11 的本地桌面伙伴。它把桌宠�
 
 当前稳定版：**v1.26.0** · [下载最新 Release](https://github.com/TianLin0509/WorkMate-Pro/releases/latest)
 
+本文新增的显式天气/Outlook 授权、数据恢复与统计修复适用于当前 main 源码构建；现有 v1.26.0 Release 发布包尚未包含这些改进，将随下一次单独发布交付。本轮未生成或发布新 EXE 安装包。
+
 ## 能做什么
 
 > v1.26.0 完整移除了智能滚动截图（AutoPageCapture）：功能入口、内嵌工具和源码都不再存在。从 v1.25.0 及更早版本升级后会失去该按钮；EXE 也因此从约 40 MB 降到约 21 MB。
@@ -51,7 +53,8 @@ v1.24.0 是第一版带内置更新器的公开基线。从更早的本地版本
 - OCR 输入/结果：`%APPDATA%\WorkMatePro\OCR\`
 - 解压出的内嵌工具：`%LOCALAPPDATA%\WorkMatePro\Tools\`
 - 离线更新收件箱、暂存与备份：`%LOCALAPPDATA%\WorkMatePro\Updates\`
-- 唯一内置联网能力是 Open-Meteo 天气/空气质量查询；会向其 HTTPS API 发送用户填写的城市名及查询坐标。
+- 天气/空气质量联网须先开启“设置 → 允许天气联网”，新安装城市为空，各类天气提醒及 Outlook 读取默认关闭。升级保留原有提醒配置，但需确认新增天气联网授权；手动天气刷新同样受控。
+- 内置联网包括已授权的 Open-Meteo 天气/空气质量查询（发送城市名及查询坐标），以及用户主动点击“手动检查 GitHub”时获取签名更新目录。无后台 GitHub 检查。
 - 没有账号、广告 SDK、遥测或自动上传。OCR 在本机处理。
 
 完整说明见 [PRIVACY.md](PRIVACY.md)。
@@ -61,6 +64,8 @@ v1.24.0 是第一版带内置更新器的公开基线。从更早的本地版本
 本项目使用 project-prep v0.1.0 的本地工作流。实现位读取 `.agents/AUTHOR.md`，独立合并位读取 `.agents/MERGER.md`，项目配置为 `.agents/project.json`。首次克隆后执行 `git config core.hooksPath .githooks`；主目录保留给审查合并，开发在独立 worktree 进行。
 
 完整本地闸门：`python -X utf8 scripts/run_checks.py`。除下述构建环境，还需 Python 3.10+、Git 2.38+ 和可用 Windows 桌面。它运行全部现有测试入口，详见 `.agents/TESTING.md`。CI 的缩小档不替代此闸门；普通本地合并不抬产品版本或发布。
+
+数据保存使用同卷原子替换；损坏或缺失的主文件优先读取有效 `.bak`，恢复后的第一次保存保留原备份。恢复及保存失败会在界面提示，保存失败不会退回覆盖写。
 
 ## 从源码构建
 

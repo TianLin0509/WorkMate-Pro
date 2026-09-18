@@ -1,6 +1,7 @@
 ﻿param(
     [string]$ExePath,
     [string]$OutputDirectory,
+    [string]$DataDirectory,
     [int]$SequentialSelfTests = 12,
     [int]$ParallelSelfTests = 6
 )
@@ -15,8 +16,11 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Pa
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $OutputDirectory = (Resolve-Path -LiteralPath $OutputDirectory).Path
 
+if ([string]::IsNullOrWhiteSpace($DataDirectory)) { $DataDirectory = Join-Path ([IO.Path]::GetTempPath()) ('wm-' + [guid]::NewGuid().ToString('N').Substring(0,8)) }
+New-Item -ItemType Directory -Path $DataDirectory -Force | Out-Null
+[IO.File]::WriteAllText((Join-Path $OutputDirectory 'data-root.txt'), $DataDirectory, [Text.UTF8Encoding]::new($false))
 function New-IsolatedRoot([string]$Prefix) {
-    $path = Join-Path $OutputDirectory ($Prefix + '-' + [guid]::NewGuid().ToString('N'))
+    $path = Join-Path $DataDirectory ($Prefix + '-' + [guid]::NewGuid().ToString('N').Substring(0,8))
     New-Item -ItemType Directory -Path $path | Out-Null
     return $path
 }

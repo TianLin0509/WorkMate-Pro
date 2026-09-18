@@ -126,6 +126,11 @@ namespace WorkMatePro
                 {
                     projects[index] = customPets.CreateProject("并发伙伴 " + index, "压力测试猫", new[] { reference });
                 });
+                for (int index = 0; index < projects.Length; index++)
+                    if (projects[index] == null || !projects[index].Success)
+                        log.Add("FAIL custom-pet-create index=" + index + " root=" + customData
+                            + " path=" + (projects[index] == null ? "<null>" : projects[index].ProjectDirectory)
+                            + " error=" + (projects[index] == null ? "<null>" : projects[index].Error));
                 if (projects.Any(delegate(CustomPetResult result) { return result == null || !result.Success; })
                     || projects.Select(delegate(CustomPetResult result) { return result.PetId; }).Distinct(StringComparer.OrdinalIgnoreCase).Count() != projects.Length)
                     throw new InvalidDataException("Concurrent custom-pet project creation lost or duplicated a project.");

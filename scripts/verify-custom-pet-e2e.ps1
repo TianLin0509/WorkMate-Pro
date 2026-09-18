@@ -1,7 +1,8 @@
 ﻿[CmdletBinding()]
 param(
     [string]$ExePath,
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [string]$DataDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +14,9 @@ $ExePath = [System.IO.Path]::GetFullPath($ExePath)
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 if (-not (Test-Path -LiteralPath $ExePath -PathType Leaf)) { throw "WorkMate executable not found: $ExePath" }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-$dataRoot = Join-Path $OutputDirectory 'data'
+if ([string]::IsNullOrWhiteSpace($DataDirectory)) { $DataDirectory = Join-Path ([IO.Path]::GetTempPath()) ('wm-ui-' + [guid]::NewGuid().ToString('N').Substring(0,8)) }
+$dataRoot = $DataDirectory
+[IO.File]::WriteAllText((Join-Path $OutputDirectory 'data-root.txt'), $dataRoot, [Text.UTF8Encoding]::new($false))
 New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
 
 Add-Type -AssemblyName System.Drawing
@@ -27,6 +30,69 @@ public static class WorkMateE2ENative {
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr handle, IntPtr dc, uint flags);
 }
 '@
+
+function Wait-CustomPetStep($Process, [int]$Step, [string]$Phase) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    $processCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $Process.Id)
+    $stepCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty, "custom-pet-step-$Step")
+    $nextCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'custom-pet-next')
+    $diagnostic = [System.Collections.Generic.List[string]]::new()
+    $diagnostic.Add("phase=$Phase pid=$($Process.Id) expectedStep=$Step")
+    do {
+        $Process.Refresh()
+        if ($Process.HasExited) { $diagnostic.Add("process exited: $($Process.ExitCode)"); break }
+        $windows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+            [System.Windows.Automation.TreeScope]::Children, $processCondition)
+        foreach ($window in $windows) {
+            try {
+                $stepElement = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $stepCondition)
+                $nextElement = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
+                if ($null -ne $stepElement -and $null -ne $nextElement -and $nextElement.Current.IsEnabled -and
+                    $nextElement.Current.BoundingRectangle.Width -gt 0) {
+                    Write-Host "READY phase=$Phase pid=$($Process.Id) step=$Step handle=$($window.Current.NativeWindowHandle)"
+                    return [pscustomobject]@{ Root=$window; Next=$nextElement; Handle=[IntPtr]$window.Current.NativeWindowHandle }
+                }
+                $line = "window=$($window.Current.NativeWindowHandle) title=$($window.Current.Name) expectedStep=$($null -ne $stepElement) next=$($null -ne $nextElement)"
+                if (-not $diagnostic.Contains($line)) { $diagnostic.Add($line) }
+            } catch {
+                $line = "UIA window read: $($_.Exception.GetType().Name): $($_.Exception.Message)"
+                if (-not $diagnostic.Contains($line)) { $diagnostic.Add($line) }
+            }
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $path = Join-Path $OutputDirectory ("custom-pet-$Phase-readiness.txt")
+    [IO.File]::WriteAllText($path, ($diagnostic -join [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+    throw "Custom-pet step $Step did not become ready during $Phase within 20 seconds. Diagnostics: $path"
+}
+
+function Write-AutomationTree($Root, [string]$Path, [int]$ProcessId, [int]$Step) {
+    # A header makes the diagnostic useful even when UIA yields no named children;
+    # never pass a pipeline-produced null array to WriteAllLines.
+    $tree = [System.Collections.Generic.List[string]]::new()
+    $tree.Add("pid=$ProcessId expectedStep=$Step handle=$($Root.Current.NativeWindowHandle)")
+    $elements = $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition)
+    $tree.Add("elementCount=$($elements.Count)")
+    $namedCount = 0
+    foreach ($element in $elements) {
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($element.Current.Name) -or -not [string]::IsNullOrWhiteSpace($element.Current.AutomationId)) {
+                $tree.Add($element.Current.AutomationId + '|' + $element.Current.Name)
+                $namedCount++
+            }
+        } catch { $tree.Add("UIA unavailable during diagnostic: " + $_.Exception.Message) }
+    }
+    $tree.Add("namedElementCount=$namedCount empty=$($namedCount -eq 0)")
+    [IO.File]::WriteAllText($Path, ($tree -join [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+    if (-not ($tree | Where-Object { $_ -like "custom-pet-step-$Step|*" }) -or
+        -not ($tree | Where-Object { $_ -like 'custom-pet-next|*' })) {
+        throw "Ready page lost its stable step/action IDs during capture. Diagnostic: $Path"
+    }
+}
 
 $oldTestRoot = [Environment]::GetEnvironmentVariable('WORKMATE_TEST_DIR')
 $oldE2E = [Environment]::GetEnvironmentVariable('WORKMATE_CUSTOM_PET_E2E')
@@ -44,39 +110,12 @@ try {
             '--custom-pet', '--custom-pet-e2e-project', ('"' + $projectPath + '"'), '--custom-pet-e2e-step', $step
         ) -WindowStyle Hidden -PassThru
         try {
-            try { $null = $testProcess.WaitForInputIdle(15000) } catch { }
-            $deadline = [DateTime]::UtcNow.AddSeconds(20)
-            do {
-                Start-Sleep -Milliseconds 200
-                $testProcess.Refresh()
-                $handle = $testProcess.MainWindowHandle
-            } while ($handle -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
-            if ($handle -eq [IntPtr]::Zero) { throw "Step $step did not expose a main window." }
-            Start-Sleep -Milliseconds 900
-
-            $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
-            $elements = $root.FindAll(
-                [System.Windows.Automation.TreeScope]::Descendants,
-                [System.Windows.Automation.Condition]::TrueCondition)
-            $tree = foreach ($element in $elements) {
-                try {
-                    if (-not [string]::IsNullOrWhiteSpace($element.Current.Name) -or -not [string]::IsNullOrWhiteSpace($element.Current.AutomationId)) {
-                        $element.Current.AutomationId + '|' + $element.Current.Name
-                    }
-                } catch { }
-            }
+            $ready = Wait-CustomPetStep $testProcess $step "step$step-start"
+            $root = $ready.Root
+            $handle = $ready.Handle
+            $nextElement = $ready.Next
             $treePath = Join-Path $OutputDirectory ("custom-pet-step{0}-automation.txt" -f $step)
-            [System.IO.File]::WriteAllLines($treePath, [string[]]$tree, [System.Text.UTF8Encoding]::new($false))
-            $hasStepId = [bool]($tree | Where-Object { $_ -like ("custom-pet-step-$step|*") })
-            $hasNextId = [bool]($tree | Where-Object { $_ -like 'custom-pet-next|*' })
-            if (-not $hasStepId -or -not $hasNextId) {
-                throw "Step $step automation tree is missing stable custom-pet ids."
-            }
-            $nextCondition = [System.Windows.Automation.PropertyCondition]::new(
-                [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-                'custom-pet-next')
-            $nextElement = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
-            if ($null -eq $nextElement -or -not $nextElement.Current.IsEnabled) { throw "Step $step next action is unavailable." }
+            Write-AutomationTree $root $treePath $testProcess.Id $step
 
             $rect = New-Object WorkMateE2ENative+RECT
             if (-not [WorkMateE2ENative]::GetWindowRect($handle, [ref]$rect)) { throw "GetWindowRect failed at step $step." }
@@ -109,14 +148,7 @@ try {
             $invoke.Invoke()
             $transitionDeadline = [DateTime]::UtcNow.AddSeconds(20)
             if ($step -lt 4) {
-                $expectedCondition = [System.Windows.Automation.PropertyCondition]::new(
-                    [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-                    ("custom-pet-step-" + ($step + 1)))
-                do {
-                    Start-Sleep -Milliseconds 200
-                    $expected = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $expectedCondition)
-                } while ($null -eq $expected -and [DateTime]::UtcNow -lt $transitionDeadline)
-                if ($null -eq $expected) { throw "Step $step did not advance through the real next action." }
+                $null = Wait-CustomPetStep $testProcess ($step + 1) "step$step-next"
             }
             else {
                 $manifestPath = Join-Path $projectPath 'manifest.json'
@@ -144,39 +176,10 @@ try {
         '--custom-pet', '--custom-pet-e2e-project', ('"' + $projectPath + '"'), '--custom-pet-e2e-step', 3
     ) -WindowStyle Hidden -PassThru
     try {
-        try { $null = $failureProcess.WaitForInputIdle(15000) } catch { }
+        $failureReady = Wait-CustomPetStep $failureProcess 3 'recovery-start'
+        $failureRoot = $failureReady.Root
+        $nextElement = $failureReady.Next
         $failureDeadline = [DateTime]::UtcNow.AddSeconds(20)
-        do {
-            Start-Sleep -Milliseconds 200
-            $failureProcess.Refresh()
-            $failureHandle = $failureProcess.MainWindowHandle
-        } while ($failureHandle -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $failureDeadline)
-        if ($failureHandle -eq [IntPtr]::Zero) { throw 'Recovery E2E did not expose a main window.' }
-        $failureRoot = [System.Windows.Automation.AutomationElement]::FromHandle($failureHandle)
-        $nextCondition = [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-            'custom-pet-next')
-        # This process owns both the pet and workbench. MainWindowHandle can
-        # initially select the pet; bind to the actual action in this process.
-        $processCondition = [System.Windows.Automation.PropertyCondition]::new(
-            [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $failureProcess.Id)
-        do {
-            $nextElement = $null
-            $processWindows = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
-                [System.Windows.Automation.TreeScope]::Children, $processCondition)
-            foreach ($candidateWindow in $processWindows) {
-                $candidateNext = $candidateWindow.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nextCondition)
-                if ($null -ne $candidateNext -and $candidateNext.Current.IsEnabled) {
-                    $failureRoot = $candidateWindow
-                    $nextElement = $candidateNext
-                    break
-                }
-            }
-            if ($null -ne $nextElement -and $nextElement.Current.IsEnabled) { break }
-            if ($failureProcess.HasExited) { throw 'Recovery E2E exited before its next action became ready.' }
-            Start-Sleep -Milliseconds 200
-        } while ([DateTime]::UtcNow -lt $failureDeadline)
-        if ($null -eq $nextElement -or -not $nextElement.Current.IsEnabled) { throw 'Recovery E2E next action is unavailable.' }
         $invoke = [System.Windows.Automation.InvokePattern]$nextElement.GetCurrentPattern(
             [System.Windows.Automation.InvokePattern]::Pattern)
         $invoke.Invoke()

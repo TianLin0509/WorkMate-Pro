@@ -488,15 +488,15 @@ namespace WorkMatePro
                     && !string.IsNullOrEmpty(store.Data.FirstCompanionDate)
                     && Math.Abs(store.Data.PetScaleRatio - ResponsivePetSizing.CompactScaleRatio) < 0.001,
                     "schema-v13-companion-presence-fields", log, ref failures);
-                Check(store.Data.MeetingRadarEnabled && store.Data.MemoNudgesEnabled && store.Data.StretchEnabled,
+                Check(!store.Data.MeetingRadarEnabled && store.Data.MemoNudgesEnabled && store.Data.StretchEnabled,
                     "v17-feature-defaults-on", log, ref failures);
-                Check(store.Data.WorkBreakReminderEnabled && store.Data.WorkBreakMinutes == 60 && store.Data.WeatherCity == "上海",
+                Check(store.Data.WorkBreakReminderEnabled && store.Data.WorkBreakMinutes == 60 && store.Data.WeatherCity == "",
                     "v122-capability-defaults", log, ref failures);
-                Check(store.Data.WeatherSentinelEnabled && store.Data.OutdoorAdvisorEnabled && store.Data.DailyBriefingEnabled
+                Check(!store.Data.WeatherSentinelEnabled && !store.Data.OutdoorAdvisorEnabled && !store.Data.DailyBriefingEnabled
                     && store.Data.DailyBriefingHour == 9 && store.Data.LastWeatherAlertKey == ""
                     && store.Data.LastOutdoorAlertKey == "" && store.Data.LastDailyBriefingDate == "",
                     "v123-active-companion-defaults", log, ref failures);
-                Check(store.Data.AmbientPresenceEnabled && store.Data.EnergyMode == "steady"
+                Check(!store.Data.AmbientPresenceEnabled && store.Data.EnergyMode == "steady"
                     && store.Data.DailyPriorityDate == "" && store.Data.LastPriorityPromptDate == "",
                     "v124-adaptive-companion-defaults", log, ref failures);
                 Check(WindowPrivacy.WdaExcludeFromCapture == 0x11, "capture-affinity-constant", log, ref failures);
@@ -796,10 +796,10 @@ namespace WorkMatePro
                     Environment.SetEnvironmentVariable("WORKMATE_TEST_DIR", legacyRoot);
                     DataStore migrated = new DataStore();
                     Check(migrated.LoadedSchemaVersion == 3 && migrated.Data.SchemaVersion == 13 && string.IsNullOrEmpty(migrated.Data.DockSide) && !migrated.Data.HideFromCaptureEnabled
-                        && migrated.Data.MeetingRadarEnabled && migrated.Data.MemoNudgesEnabled && migrated.Data.StretchEnabled
-                        && migrated.Data.WorkBreakReminderEnabled && migrated.Data.WorkBreakMinutes == 60 && migrated.Data.WeatherCity == "上海"
-                        && migrated.Data.WeatherSentinelEnabled && migrated.Data.OutdoorAdvisorEnabled && migrated.Data.DailyBriefingEnabled && migrated.Data.DailyBriefingHour == 9
-                        && migrated.Data.AmbientPresenceEnabled && migrated.Data.EnergyMode == "steady"
+                        && !migrated.Data.MeetingRadarEnabled && migrated.Data.MemoNudgesEnabled && migrated.Data.StretchEnabled
+                        && migrated.Data.WorkBreakReminderEnabled && migrated.Data.WorkBreakMinutes == 60 && migrated.Data.WeatherCity == ""
+                        && !migrated.Data.WeatherSentinelEnabled && !migrated.Data.OutdoorAdvisorEnabled && !migrated.Data.DailyBriefingEnabled && migrated.Data.DailyBriefingHour == 9
+                        && !migrated.Data.AmbientPresenceEnabled && migrated.Data.EnergyMode == "steady"
                         && migrated.Data.PetSize == 190 && Math.Abs(migrated.Data.PetScaleRatio - ResponsivePetSizing.CompactScaleRatio) < 0.001,
                         "schema-v3-capture-safe-migration", log, ref failures);
                 }
@@ -816,7 +816,7 @@ namespace WorkMatePro
                     DataStore migratedV12 = new DataStore();
                     Check(migratedV12.LoadedSchemaVersion == 12 && migratedV12.Data.SchemaVersion == 13
                         && migratedV12.Data.AnchorMemoId == "" && migratedV12.Data.DailyPriorityDate == ""
-                        && migratedV12.Data.AmbientPresenceEnabled && migratedV12.TodayEnergyMode == "steady",
+                        && !migratedV12.Data.AmbientPresenceEnabled && migratedV12.TodayEnergyMode == "steady",
                         "schema-v12-clears-legacy-anchor-before-daily-priority", log, ref failures);
                 }
                 finally { Environment.SetEnvironmentVariable("WORKMATE_TEST_DIR", oldTestRoot); }
@@ -1213,6 +1213,7 @@ namespace WorkMatePro
                     Check(sent && arrived && bridgeMessage == EventBridge.ActivateWorkbench,
                         "activation-pipe-roundtrip", log, ref failures);
                 }
+                ReliabilityChecks.Run(log, ref failures);
             }
             catch (Exception ex)
             {

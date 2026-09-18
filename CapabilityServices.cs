@@ -330,6 +330,9 @@ namespace WorkMatePro
         private readonly object sync = new object();
         private readonly Dictionary<string, CacheEntry> cache = new Dictionary<string, CacheEntry>(StringComparer.OrdinalIgnoreCase);
         private long requestSequence;
+        public Func<bool> NetworkAllowed { get; set; }
+
+        private bool MayUseNetwork { get { return NetworkAllowed != null && NetworkAllowed(); } }
 
         public void GetAsync(string city, Action<WeatherResponse> callback)
         {
@@ -379,6 +382,7 @@ namespace WorkMatePro
 
         public AmbientResponse GetAmbient(string city, bool forceRefresh)
         {
+            if (!MayUseNetwork) return new AmbientResponse { Success = false, Error = "天气联网尚未授权。" };
             string normalized = NormalizeCity(city);
             if (normalized.Length == 0) return new AmbientResponse { Success = false, Error = "请先填写城市。" };
 
@@ -554,8 +558,9 @@ namespace WorkMatePro
             return snapshot;
         }
 
-        private static string Download(string url)
+        private string Download(string url)
         {
+            if (!MayUseNetwork) throw new InvalidOperationException("天气联网授权已关闭。");
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             using (TimeoutWebClient client = new TimeoutWebClient())
             {

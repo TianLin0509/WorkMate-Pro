@@ -54,6 +54,9 @@ namespace WorkMatePro
         [DllImport("user32.dll")]
         public static extern int GetMessageTime();
 
+        [DllImport("kernel32.dll")]
+        public static extern ulong GetTickCount64();
+
         public delegate bool MonitorEnumProc(IntPtr monitor, IntPtr hdc, IntPtr rect, IntPtr data);
 
         [DllImport("user32.dll")]
@@ -130,7 +133,13 @@ namespace WorkMatePro
             return registered;
         }
 
-        private static double Now() { return Environment.TickCount / 1000.0; }
+        private static double Now() { return NativeSignals.GetTickCount64() / 1000.0; }
+
+        public static double MessageTimeSeconds(int messageTick, ulong nowTick)
+        {
+            uint age = unchecked((uint)nowTick - (uint)messageTick);
+            return (nowTick - (double)age) / 1000.0;
+        }
 
         /// <summary>
         /// 处理一条 WM_INPUT。eventTimeSeconds 用消息投递时间（GetMessageTime，与 TickCount 同基），
@@ -149,7 +158,7 @@ namespace WorkMatePro
                 if (NativeSignals.GetRawInputData(lParam, NativeSignals.RID_INPUT, buffer, ref size, headerSize) != size) { ParseFailures++; return; }
                 uint type = (uint)Marshal.ReadInt32(buffer, 0);
                 long bodyAddress = buffer.ToInt64() + headerSize;
-                double now = eventTimeSeconds > 0 ? eventTimeSeconds : Now();
+                double now = eventTimeSeconds;
                 LastNowProcess = Now();
                 bool activity = false;
                 lock (sync)
@@ -236,6 +245,10 @@ namespace WorkMatePro
             LastNowRates = now;
             lock (sync)
             {
+                Prune(keys, now, 60);
+                PrunePairs(wheels, now, 60);
+                Prune(clicks, now, 60);
+                Prune(moves, now, 12);
                 keyPerMin = RatePerMin(keys, now, 8);
                 wheelPerMin = NotchesPerMin(wheels, now, 10);
                 clickPerMin = RatePerMin(clicks, now, 8);
@@ -249,7 +262,10 @@ namespace WorkMatePro
         public static int ComputeIdle(double lastInput, double now)
         {
             if (lastInput == double.MinValue) return 0;
-            return (int)Math.Max(0, now - lastInput);
+            double elapsed = now - lastInput;
+            // Compatibility for signed 32-bit timestamps supplied by older callers/tests.
+            if (elapsed < -2147483.648) elapsed += 4294967.296;
+            return (int)Math.Min(int.MaxValue, Math.Max(0, elapsed));
         }
 
         /// <summary>只统计"有意输入"（键盘/滚轮/点击）的空闲——纯鼠标移动不算，看视频时手抖不误伤。</summary>

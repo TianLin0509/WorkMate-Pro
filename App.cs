@@ -876,13 +876,24 @@ namespace WorkMatePro
         {
             base.OnStartup(e);
             FrameworkElement.LanguageProperty.OverrideMetadata(typeof(FrameworkElement), new FrameworkPropertyMetadata(XmlLanguage.GetLanguage("zh-CN")));
-            Store = new DataStore();
+            try { Store = new DataStore(); }
+            catch (Exception ex)
+            {
+                MessageBox.Show("无法读取或保存本地数据：" + ex.Message, "WorkMate 启动失败", MessageBoxButton.OK, MessageBoxImage.Error);
+                Shutdown(1);
+                return;
+            }
+            Store.StorageFailed += delegate(string message) { MessageBox.Show(message, "WorkMate 保存失败", MessageBoxButton.OK, MessageBoxImage.Warning); };
+            Store.StatisticsReset += interruptionAnalytics.Reset;
+            if (!string.IsNullOrEmpty(Store.StorageNotice)) MessageBox.Show(Store.StorageNotice, "WorkMate 数据恢复", MessageBoxButton.OK, MessageBoxImage.Warning);
             CustomPets = new CustomPetService(Store.RootDirectory);
             Carry = new CarryService(Store);
             MeetingRadar = new OutlookMeetingRadar();
+            MeetingRadar.SetEnabled(Store.Data.MeetingRadarEnabled);
             Tools = new EmbeddedToolManager();
             Ocr = new WindowsOcrService(Tools, Store.RootDirectory);
             Weather = new OpenMeteoWeatherService();
+            Weather.NetworkAllowed = delegate { return Store.Data.WeatherNetworkAllowed; };
             Updates = new UpdateManager();
             UpdateInstaller = new UpdateInstallCoordinator(this, Updates);
             nextAmbientPollAt = DateTime.Now.AddSeconds(15);
@@ -1111,7 +1122,7 @@ namespace WorkMatePro
             if (RawInput != null)
             {
                 // 消息投递时间（与 TickCount 同基）：主机拥塞延迟投递时仍按真实输入时刻统计
-                double eventTime = NativeSignals.GetMessageTime() / 1000.0;
+                double eventTime = RawInputMonitor.MessageTimeSeconds(NativeSignals.GetMessageTime(), NativeSignals.GetTickCount64());
                 RawInput.ProcessInput(lParam, eventTime);
             }
         }
@@ -1162,7 +1173,7 @@ namespace WorkMatePro
             Pet.SetRetreat((Store.Data.PresentationGuardEnabled && Guard.ShouldRetreat) || DemoModeActive);
 
             // 心流记账（不触发工作奖励，单独累计）
-            if (output.FlowActive && engineTicks % 4 == 0) Store.AddFlowSeconds(2);
+            if (Store.Data.TrackEnabled && output.FlowActive && engineTicks % 4 == 0) Store.AddFlowSeconds(2);
 
             // 中断恢复书签：连续的开会/离开合并为一次中断，真正回到工作态后再提醒。
             BehaviorState nowBehavior = output.State;
@@ -1486,6 +1497,7 @@ namespace WorkMatePro
 
         public void ShowDailyBriefing(Action<string> callback)
         {
+            if (!Store.Data.WeatherNetworkAllowed) { PresentDailyBriefing(callback); return; }
             if (latestAmbient != null && DateTime.Now - latestAmbient.RetrievedAt < TimeSpan.FromMinutes(60))
             {
                 PresentDailyBriefing(callback);
@@ -1501,6 +1513,20 @@ namespace WorkMatePro
         public void ScheduleAmbientRefresh()
         {
             nextAmbientPollAt = DateTime.Now;
+        }
+
+        public void SetWeatherNetworkAllowed(bool allowed)
+        {
+            Store.Data.WeatherNetworkAllowed = allowed;
+            ++ambientRequestGeneration;
+            ambientPollInFlight = ambientInteractiveInFlight = false;
+            latestAmbient = null;
+            pendingDailyBriefing = false;
+            pendingProactiveNotices.Purge("weather");
+            pendingProactiveNotices.Purge("outdoor");
+            if (Pet != null) Pet.UpdateAmbientPresence(null);
+            Store.Save();
+            if (allowed) ScheduleAmbientRefresh();
         }
 
         public void SetWeatherSentinelEnabled(bool enabled)
@@ -1553,6 +1579,11 @@ namespace WorkMatePro
 
         private void FetchAmbient(string city, bool forceRefresh, Action<AmbientResponse> callback)
         {
+            if (!Store.Data.WeatherNetworkAllowed)
+            {
+                if (callback != null) callback(new AmbientResponse { Success = false, Error = "天气联网尚未授权，请在设置中开启“允许天气联网”。" });
+                return;
+            }
             string normalized = (city ?? "").Trim();
             if (normalized.Length > 50) normalized = normalized.Substring(0, 50);
             if (normalized.Length > 0 && !string.Equals(Store.Data.WeatherCity, normalized, StringComparison.Ordinal))
@@ -1572,7 +1603,7 @@ namespace WorkMatePro
             {
                 Dispatcher.BeginInvoke(new Action(delegate
                 {
-                    if (requestGeneration != ambientRequestGeneration) return;
+                    if (!Store.Data.WeatherNetworkAllowed || requestGeneration != ambientRequestGeneration) return;
                     ambientInteractiveInFlight = false;
                     if (!string.Equals(Store.Data.WeatherCity, normalized, StringComparison.Ordinal)) return;
                     ambientAttemptFinished = true;
@@ -1590,6 +1621,7 @@ namespace WorkMatePro
 
         private void AmbientBackgroundTick(EngineOutput output, DateTime now)
         {
+            if (!Store.Data.WeatherNetworkAllowed) return;
             if (latestAmbient != null && AmbientFreshnessPolicy.ForPresence(latestAmbient, now) == null)
             {
                 latestAmbient = null;
@@ -1634,6 +1666,7 @@ namespace WorkMatePro
 
         private void PollAmbientInBackground(DateTime now)
         {
+            if (!Store.Data.WeatherNetworkAllowed) return;
             string city = (Store.Data.WeatherCity ?? "").Trim();
             if (city.Length == 0) return;
             ambientPollInFlight = true;
@@ -1644,7 +1677,7 @@ namespace WorkMatePro
                 Dispatcher.BeginInvoke(new Action(delegate
                 {
                     ambientPollInFlight = false;
-                    if (requestGeneration != ambientRequestGeneration
+                    if (!Store.Data.WeatherNetworkAllowed || requestGeneration != ambientRequestGeneration
                         || !string.Equals(Store.Data.WeatherCity, city, StringComparison.Ordinal))
                     {
                         nextAmbientPollAt = DateTime.Now;
@@ -1811,6 +1844,9 @@ namespace WorkMatePro
         [STAThread]
         public static void Main(string[] args)
         {
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WORKMATE_TEST_DIR"))
+                && Environment.GetEnvironmentVariable("WORKMATE_TEST_SOFTWARE_RENDERING") == "1")
+                System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
             if (args != null && args.Length > 0 && args[0] == "--apply-update")
             {
                 Environment.ExitCode = UpdateApplier.Run(args);

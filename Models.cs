@@ -104,6 +104,7 @@ namespace WorkMatePro
         public bool WorkBreakReminderEnabled { get; set; }
         public int WorkBreakMinutes { get; set; }
         public string WeatherCity { get; set; }
+        public bool WeatherNetworkAllowed { get; set; }
         public bool WeatherSentinelEnabled { get; set; }
         public bool OutdoorAdvisorEnabled { get; set; }
         public bool DailyBriefingEnabled { get; set; }
@@ -146,21 +147,21 @@ namespace WorkMatePro
             HourlyActiveSeconds = new Dictionary<string, Dictionary<string, int>>();
             Interruptions = new Dictionary<string, InterruptionDay>();
             CarryItems = new List<CarryItem>();
-            MeetingRadarEnabled = true;
+            MeetingRadarEnabled = false;
             MemoNudgesEnabled = true;
             StretchEnabled = true;
             LastMemoNudgeAt = "";
             WorkBreakReminderEnabled = true;
             WorkBreakMinutes = 60;
-            WeatherCity = "上海";
-            WeatherSentinelEnabled = true;
-            OutdoorAdvisorEnabled = true;
-            DailyBriefingEnabled = true;
+            WeatherCity = "";
+            WeatherSentinelEnabled = false;
+            OutdoorAdvisorEnabled = false;
+            DailyBriefingEnabled = false;
             DailyBriefingHour = 9;
             LastWeatherAlertKey = "";
             LastOutdoorAlertKey = "";
             LastDailyBriefingDate = "";
-            AmbientPresenceEnabled = true;
+            AmbientPresenceEnabled = false;
             DailyPriorityDate = "";
             LastPriorityPromptDate = "";
             LastPriorityRewardDate = "";
@@ -176,11 +177,47 @@ namespace WorkMatePro
         }
     }
 
+    internal static class AtomicFileReplacement
+    {
+        internal static int Win32Code(Exception error)
+        {
+            return (error.HResult & unchecked((int)0xffff0000)) == unchecked((int)0x80070000)
+                ? error.HResult & 0xffff : -1;
+        }
+
+        internal static void Execute(Action replace, Action<int> delay)
+        {
+            for (int attempt = 0; ; attempt++)
+            {
+                try { replace(); return; }
+                catch (IOException ex)
+                {
+                    int code = Win32Code(ex);
+                    // ReplaceFileW: 32/33 and 1175 retain the original file names.
+                    // 1176/1177 may partially move files; never retry those states.
+                    if ((code != 32 && code != 33 && code != 1175) || attempt >= 4) throw;
+                    delay(25 << attempt); // Four bounded waits: 25+50+100+200 ms.
+                }
+            }
+        }
+
+        internal static void Replace(string source, string target, string backup)
+        {
+            Execute(delegate { File.Replace(source, target, backup, true); }, System.Threading.Thread.Sleep);
+        }
+    }
+
     public sealed class DataStore
     {
         private readonly object sync = new object();
         private readonly JavaScriptSerializer serializer = new JavaScriptSerializer();
         private bool normalizeRequiresSave;
+        private bool preserveBackup;
+        private bool saveRequiresRecovery;
+        internal Action<string, string, string> ReplaceFile = AtomicFileReplacement.Replace;
+        public string StorageNotice { get; private set; }
+        public event Action<string> StorageFailed;
+        public event Action StatisticsReset;
 
         public WorkMateData Data { get; private set; }
         public int LoadedSchemaVersion { get; private set; }
@@ -203,26 +240,63 @@ namespace WorkMatePro
         {
             lock (sync)
             {
+                Data = null;
+                StorageNotice = "";
+                preserveBackup = false;
+                saveRequiresRecovery = false;
                 try
                 {
                     if (File.Exists(DataPath))
                     {
                         string json = File.ReadAllText(DataPath, Encoding.UTF8);
-                        Data = serializer.Deserialize<WorkMateData>(json);
+                        Data = ReadData(json);
+                        if (Data == null) throw new InvalidDataException("数据文件内容为空。");
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    string bad = DataPath + ".corrupt-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
-                    try { if (File.Exists(DataPath)) File.Copy(DataPath, bad, true); } catch { }
+                    string bad = DataPath + ".corrupt-" + Guid.NewGuid().ToString("N");
+                    StorageNotice = "主数据读取失败：" + ex.Message;
+                    try { if (File.Exists(DataPath)) File.Copy(DataPath, bad, false); }
+                    catch (Exception copyError) { StorageNotice += "；损坏副本保留失败：" + copyError.Message; }
                     Data = null;
+                    preserveBackup = true;
                 }
+                if (Data == null && File.Exists(DataPath + ".bak"))
+                {
+                    try
+                    {
+                        Data = ReadData(File.ReadAllText(DataPath + ".bak", Encoding.UTF8));
+                        if (Data == null) throw new InvalidDataException("备份内容为空。");
+                        StorageNotice += "；已从最后有效备份恢复，原备份保留。";
+                        preserveBackup = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        StorageNotice += "；备份读取失败：" + ex.Message;
+                        try { File.Copy(DataPath + ".bak", DataPath + ".bak.corrupt-" + Guid.NewGuid().ToString("N"), false); }
+                        catch (Exception copyError) { StorageNotice += "；损坏备份保留失败：" + copyError.Message; }
+                    }
+                }
+                if (Data == null && StorageNotice.Length > 0) StorageNotice += "；暂以空白数据启动，原文件保留，请先检查备份。";
                 if (Data == null) Data = new WorkMateData();
                 normalizeRequiresSave = false;
                 Normalize();
                 // 迁移不是只存在内存里：首次启动新版本就把尺寸比例与 schema 原子落盘。
-                if (LoadedSchemaVersion != Data.SchemaVersion || normalizeRequiresSave) Save();
+                if (!preserveBackup && (LoadedSchemaVersion != Data.SchemaVersion || normalizeRequiresSave)) Save();
             }
+        }
+
+        private WorkMateData ReadData(string json)
+        {
+            WorkMateData value = serializer.Deserialize<WorkMateData>(json);
+            if (value == null || (value.Memos != null && value.Memos.Any(item => item == null))
+                || (value.CarryItems != null && value.CarryItems.Any(item => item == null))
+                || (value.Stats != null && value.Stats.Values.Any(item => item == null))
+                || (value.HourlyActiveSeconds != null && value.HourlyActiveSeconds.Values.Any(item => item == null))
+                || (value.Interruptions != null && value.Interruptions.Values.Any(item => item == null)))
+                throw new InvalidDataException("数据结构无效。");
+            return value;
         }
 
         private void Normalize()
@@ -290,24 +364,19 @@ namespace WorkMatePro
             if (loadedSchemaVersion < 5) Data.HideFromCaptureEnabled = false;
             if (loadedSchemaVersion < 7)
             {
-                // v7 新增的三个功能默认开启；旧 JSON 反序列化 bool 会得到 false，需要显式迁移。
-                Data.MeetingRadarEnabled = true;
+                // Local-only legacy defaults; Outlook requires an explicit stored choice.
                 Data.MemoNudgesEnabled = true;
                 Data.StretchEnabled = true;
             }
             if (loadedSchemaVersion < 11)
             {
-                // v1.22：旧 JSON 中新增的 bool/int 会反序列化成 false/0，显式迁移到产品默认值。
+                // Preserve the historical local work-break defaults.
                 Data.WorkBreakReminderEnabled = true;
                 Data.WorkBreakMinutes = 60;
-                Data.WeatherCity = "上海";
             }
             if (loadedSchemaVersion < 12)
             {
-                // 三个主动能力对旧数据默认开启；提醒键显式留空，避免把缺省值误作已提醒。
-                Data.WeatherSentinelEnabled = true;
-                Data.OutdoorAdvisorEnabled = true;
-                Data.DailyBriefingEnabled = true;
+                // Preserve explicit weather choices; missing flags remain opt-in.
                 Data.DailyBriefingHour = 9;
                 Data.LastWeatherAlertKey = "";
                 Data.LastOutdoorAlertKey = "";
@@ -315,8 +384,7 @@ namespace WorkMatePro
             }
             if (loadedSchemaVersion < 13)
             {
-                // v1.24：环境共感默认开启；今日一件事和能量状态从空白开始，不猜测用户状态。
-                Data.AmbientPresenceEnabled = true;
+                // Preserve explicit ambient choices; reset legacy daily-priority state.
                 Data.AnchorMemoId = "";
                 Data.DailyPriorityDate = "";
                 Data.LastPriorityPromptDate = "";
@@ -328,7 +396,6 @@ namespace WorkMatePro
             if (Data.WorkBreakMinutes < 15 || Data.WorkBreakMinutes > 240) Data.WorkBreakMinutes = 60;
             if (Data.DailyBriefingHour < 6 || Data.DailyBriefingHour > 12) Data.DailyBriefingHour = 9;
             Data.WeatherCity = (Data.WeatherCity ?? "").Trim();
-            if (Data.WeatherCity.Length == 0) Data.WeatherCity = "上海";
             if (Data.WeatherCity.Length > 50) Data.WeatherCity = Data.WeatherCity.Substring(0, 50);
             if (Data.EnergyMode != "low" && Data.EnergyMode != "high") Data.EnergyMode = "steady";
             if (Data.DailyPriorityDate.Length > 0 && Data.DailyPriorityDate != DateTime.Today.ToString("yyyy-MM-dd"))
@@ -350,25 +417,44 @@ namespace WorkMatePro
         {
             lock (sync)
             {
-                Directory.CreateDirectory(RootDirectory);
-                Data.SchemaVersion = 13;
-                string json = serializer.Serialize(Data);
-                string temp = DataPath + ".tmp";
-                File.WriteAllText(temp, json, new UTF8Encoding(false));
+                if (saveRequiresRecovery) throw new IOException(StorageNotice);
+                string temp = DataPath + ".tmp-" + Guid.NewGuid().ToString("N");
+                bool keepRecoveryTemp = false;
                 try
                 {
+                    Directory.CreateDirectory(RootDirectory);
+                    Data.SchemaVersion = 13;
+                    string json = serializer.Serialize(Data);
+                    using (FileStream stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    {
+                        byte[] bytes = new UTF8Encoding(false).GetBytes(json);
+                        stream.Write(bytes, 0, bytes.Length);
+                        stream.Flush(true);
+                    }
                     if (File.Exists(DataPath))
                     {
-                        string backup = DataPath + ".bak";
-                        File.Replace(temp, DataPath, backup, true);
+                        string backup = preserveBackup ? null : DataPath + ".bak";
+                        ReplaceFile(temp, DataPath, backup);
                     }
                     else File.Move(temp, DataPath);
+                    preserveBackup = false;
                 }
-                catch
+                catch (Exception ex)
                 {
-                    File.Copy(temp, DataPath, true);
-                    try { File.Delete(temp); } catch { }
+                    int code = AtomicFileReplacement.Win32Code(ex);
+                    keepRecoveryTemp = code == 1176 || code == 1177;
+                    StorageNotice = "保存失败，本次修改未确认保存（错误码 " + code + "）：" + ex.Message;
+                    if (keepRecoveryTemp)
+                    {
+                        saveRequiresRecovery = true;
+                        StorageNotice += "；替换可能部分完成，请检查原文件与备份，不要继续覆盖。";
+                        if (File.Exists(temp)) StorageNotice += " 临时恢复文件：" + temp;
+                    }
+                    Action<string> failed = StorageFailed;
+                    if (failed != null) failed(StorageNotice);
+                    throw new IOException(StorageNotice, ex);
                 }
+                finally { try { if (!keepRecoveryTemp && File.Exists(temp)) File.Delete(temp); } catch { } }
             }
             RaiseChanged();
         }
@@ -383,7 +469,8 @@ namespace WorkMatePro
             memo.Important = important;
             memo.Urgent = urgent;
             Data.Memos.Insert(0, memo);
-            Save();
+            try { Save(); }
+            catch { Data.Memos.Remove(memo); throw; }
             return memo;
         }
 
@@ -478,15 +565,23 @@ namespace WorkMatePro
         {
             string today = DateTime.Today.ToString("yyyy-MM-dd");
             Data.Stats.Remove(today);
-            Data.DailyWorkAwards.Remove(today);
+            Data.FlowSeconds.Remove(today);
             Data.HourlyActiveSeconds.Remove(today);
             Data.Interruptions.Remove(today);
+            if (StatisticsReset != null) StatisticsReset();
+            Save();
+        }
+
+        public void SetTrackingEnabled(bool enabled)
+        {
+            Data.TrackEnabled = enabled;
+            if (!enabled && StatisticsReset != null) StatisticsReset();
             Save();
         }
 
         public void AddStatSeconds(string category, int seconds)
         {
-            if (seconds <= 0) return;
+            if (!Data.TrackEnabled || seconds <= 0) return;
             string today = DateTime.Today.ToString("yyyy-MM-dd");
             Dictionary<string, int> day;
             if (!Data.Stats.TryGetValue(today, out day))
@@ -598,7 +693,7 @@ namespace WorkMatePro
 
         public void AddFlowSeconds(int seconds)
         {
-            if (seconds <= 0) return;
+            if (!Data.TrackEnabled || seconds <= 0) return;
             string today = DateTime.Today.ToString("yyyy-MM-dd");
             int old;
             Data.FlowSeconds.TryGetValue(today, out old);
@@ -659,6 +754,7 @@ namespace WorkMatePro
 
         public void RecordInterruption(string kind, int seconds, DateTime now)
         {
+            if (!Data.TrackEnabled) return;
             string dayKey = now.ToString("yyyy-MM-dd");
             InterruptionDay day;
             if (!Data.Interruptions.TryGetValue(dayKey, out day))
@@ -858,6 +954,7 @@ namespace WorkMatePro
         public ActivityTracker(DataStore store)
         {
             this.store = store;
+            store.StatisticsReset += ResetPending;
             timer = new System.Windows.Threading.DispatcherTimer();
             timer.Interval = TimeSpan.FromSeconds(5);
             timer.Tick += Tick;
@@ -865,9 +962,12 @@ namespace WorkMatePro
 
         public void Start() { timer.Start(); }
 
+        private void ResetPending() { focusedSeconds = 0; breakRewardPending = false; ticksSinceSave = 0; }
+
         private void Tick(object sender, EventArgs e)
         {
             ActivitySnapshot snapshot = ReadSnapshot();
+            if (!store.Data.TrackEnabled) ResetPending();
             if (store.Data.TrackEnabled && snapshot.Active && !string.Equals(snapshot.ProcessName, Process.GetCurrentProcess().ProcessName, StringComparison.OrdinalIgnoreCase))
             {
                 store.AddStatSeconds(snapshot.Category, 5);
@@ -925,6 +1025,7 @@ namespace WorkMatePro
         public void Dispose()
         {
             timer.Stop();
+            store.StatisticsReset -= ResetPending;
         }
     }
 

@@ -1,7 +1,8 @@
 ﻿[CmdletBinding()]
 param(
     [string]$ExePath,
-    [string]$OutputDirectory
+    [string]$OutputDirectory,
+    [string]$DataDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +14,9 @@ $ExePath = [System.IO.Path]::GetFullPath($ExePath)
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 if (-not (Test-Path -LiteralPath $ExePath -PathType Leaf)) { throw "WorkMate executable not found: $ExePath" }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-$dataRoot = Join-Path $OutputDirectory 'data'
+if ([string]::IsNullOrWhiteSpace($DataDirectory)) { $DataDirectory = Join-Path ([IO.Path]::GetTempPath()) ('wm-ui-' + [guid]::NewGuid().ToString('N').Substring(0,8)) }
+$dataRoot = $DataDirectory
+[IO.File]::WriteAllText((Join-Path $OutputDirectory 'data-root.txt'), $dataRoot, [Text.UTF8Encoding]::new($false))
 New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
 
 Add-Type -AssemblyName System.Drawing

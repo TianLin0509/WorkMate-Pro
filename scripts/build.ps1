@@ -24,6 +24,17 @@ if ($Clean -and (Test-Path -LiteralPath $dist)) {
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
 
+$assemblySource = Get-Content -LiteralPath (Join-Path $project 'AssemblyInfo.cs') -Raw -Encoding UTF8
+$fileVersion = [regex]::Match($assemblySource, 'AssemblyFileVersion\("([0-9.]+)"\)').Groups[1].Value
+$assemblyVersion = [regex]::Match($assemblySource, 'AssemblyVersion\("([0-9.]+)"\)').Groups[1].Value
+[xml]$manifestSource = Get-Content -LiteralPath (Join-Path $project 'app.manifest') -Raw -Encoding UTF8
+$manifestVersion = $manifestSource.assembly.assemblyIdentity.version
+$readmeSource = Get-Content -LiteralPath (Join-Path $project 'README.md') -Raw -Encoding UTF8
+$readmeVersion = [regex]::Match($readmeSource, '\*\*v([0-9.]+)\*\*').Groups[1].Value
+if (-not $fileVersion -or $assemblyVersion -ne $fileVersion -or $manifestVersion -ne $fileVersion -or
+    $readmeVersion -ne ([version]$fileVersion).ToString(3)) { throw "Version sources disagree: file=$fileVersion assembly=$assemblyVersion manifest=$manifestVersion readme=$readmeVersion" }
+Write-Host "PASS version-consistency version=$fileVersion"
+
 # 300 帧进入编译前先做低成本视觉连续性门禁：尺寸、透明主体、相邻帧中心/面积/主色突变。
 Write-Host 'Sprite QC begin'
 & (Join-Path $scriptRoot 'verify-sprite-qc.ps1') -Strict

@@ -29,8 +29,10 @@ namespace WorkMatePro
         private readonly object sync = new object();
         private List<MeetingInfo> upcoming = new List<MeetingInfo>();
         private DateTime lastPoll = DateTime.MinValue;
-        private bool polling;
+        private volatile bool polling;
         private bool disposed;
+        private volatile bool enabled;
+        private volatile int generation;
 
         public string Status { get; private set; }
         public bool OutlookAvailable { get; private set; }
@@ -60,25 +62,47 @@ namespace WorkMatePro
 
         public void PollIfDue(bool force)
         {
-            if (disposed || polling) return;
+            if (!enabled || disposed || polling) return;
             if (!force && (DateTime.Now - lastPoll).TotalMinutes < 3) return;
             polling = true;
             lastPoll = DateTime.Now;
-            Thread worker = new Thread(ReadCalendar);
+            int requestGeneration = generation;
+            Thread worker = new Thread(delegate() { ReadCalendar(requestGeneration); });
             worker.IsBackground = true;
             worker.Name = "WorkMate-OutlookCalendar";
             worker.SetApartmentState(ApartmentState.STA);
             worker.Start();
         }
 
-        private void ReadCalendar()
+        public void SetEnabled(bool value)
         {
-            object outlook = null, session = null, calendar = null, items = null;
+            lock (sync)
+            {
+                enabled = value;
+                generation++;
+                upcoming.Clear();
+                OutlookAvailable = false;
+                Status = value ? "尚未读取" : "未授权读取 Outlook";
+                lastPoll = DateTime.MinValue;
+            }
+        }
+
+        public static List<MeetingInfo> SelectUpcoming(IEnumerable<MeetingInfo> source, DateTime from, DateTime until)
+        {
+            return source.Where(m => m != null && m.End >= from && m.Start <= until && m.End >= m.Start)
+                .GroupBy(m => (m.Id ?? "") + "|" + m.Start.ToString("o"))
+                .Select(g => g.First()).OrderBy(m => m.Start).Take(20).ToList();
+        }
+
+        private void ReadCalendar(int requestGeneration)
+        {
+            object outlook = null, session = null, calendar = null, items = null, restricted = null;
             List<MeetingInfo> result = new List<MeetingInfo>();
             string status = "Outlook 暂不可用";
             bool available = false;
             try
             {
+                if (!enabled || requestGeneration != generation) return;
                 Type type = Type.GetTypeFromProgID("Outlook.Application");
                 if (type == null) throw new InvalidOperationException("未安装 Outlook 桌面版");
                 outlook = Activator.CreateInstance(type);
@@ -91,28 +115,30 @@ namespace WorkMatePro
                 dynamic collection = items;
                 collection.Sort("[Start]", false);
                 collection.IncludeRecurrences = true;
-                int count = Math.Min(500, (int)collection.Count);
                 DateTime from = DateTime.Now.AddMinutes(-10);
                 DateTime until = DateTime.Now.AddDays(2);
-                for (int index = 1; index <= count; index++)
-                {
-                    object raw = null;
-                    try
+                // Outlook Jet date syntax uses the current Windows regional short date/time.
+                string filter = "[End] >= '" + from.ToString("g") + "' AND [Start] <= '" + until.ToString("g") + "'";
+                restricted = collection.Restrict(filter);
+                dynamic selected = restricted;
+                int errors = 0;
+                bool capped = false;
+                result = ReadCursor(delegate { return (object)selected.GetFirst(); }, delegate { return (object)selected.GetNext(); },
+                    delegate(object raw)
                     {
-                        raw = collection.Item(index);
                         dynamic item = raw;
                         DateTime start = (DateTime)item.Start;
-                        if (start > until) break;
                         DateTime end = (DateTime)item.End;
-                        if (end < from) continue;
+                        if (start > until || end < from) return null;
+                        if (end < start) throw new InvalidOperationException("会议结束时间早于开始时间。");
                         string subject = SafeString(delegate { return (string)item.Subject; }, "未命名会议");
                         string location = SafeString(delegate { return (string)item.Location; }, "");
                         string attendees = SafeString(delegate { return (string)item.RequiredAttendees; }, "");
                         string optional = SafeString(delegate { return (string)item.OptionalAttendees; }, "");
                         if (attendees.Length == 0) attendees = optional;
                         else if (optional.Length > 0) attendees += "; " + optional;
-                        string id = SafeString(delegate { return (string)item.EntryID; }, subject + "|" + start.ToString("o"));
-                        result.Add(new MeetingInfo
+                        string id = SafeString(delegate { return (string)item.EntryID; }, subject) + "|" + start.ToString("o");
+                        return new MeetingInfo
                         {
                             Id = id,
                             Subject = subject,
@@ -120,14 +146,12 @@ namespace WorkMatePro
                             End = end,
                             Location = location,
                             Attendees = CompactAttendees(attendees)
-                        });
-                    }
-                    catch { }
-                    finally { Release(raw); }
-                }
-                result = result.GroupBy(delegate(MeetingInfo meeting) { return meeting.Id; }).Select(delegate(IGrouping<string, MeetingInfo> group) { return group.First(); }).OrderBy(delegate(MeetingInfo meeting) { return meeting.Start; }).Take(20).ToList();
+                        };
+                    }, Release, delegate { return !enabled || requestGeneration != generation; }, out errors, out capped);
+                result = SelectUpcoming(result, from, until);
                 available = true;
-                status = result.Count == 0 ? "未来两天没有会议" : "已同步 " + result.Count + " 场会议";
+                status = errors > 0 || capped ? "日历读取不完整（失败 " + errors + (capped ? "，达到 500 条上限" : "") + "），请在 Outlook 核对"
+                    : result.Count == 0 ? "未来两天没有会议" : "已同步 " + result.Count + " 场会议";
             }
             catch (Exception ex)
             {
@@ -135,11 +159,17 @@ namespace WorkMatePro
             }
             finally
             {
-                Release(items); Release(calendar); Release(session); Release(outlook);
-                lock (sync) upcoming = result;
-                OutlookAvailable = available;
-                Status = status;
-                polling = false;
+                Release(restricted); Release(items); Release(calendar); Release(session); Release(outlook);
+                lock (sync)
+                {
+                    if (enabled && requestGeneration == generation)
+                    {
+                        if (available) upcoming = result;
+                        OutlookAvailable = available;
+                        Status = status;
+                    }
+                    polling = false;
+                }
                 EventHandler handler = Updated;
                 if (handler != null) handler(this, EventArgs.Empty);
             }
@@ -148,6 +178,30 @@ namespace WorkMatePro
         private static string SafeString(Func<string> getter, string fallback)
         {
             try { return (getter() ?? "").Trim(); } catch { return fallback; }
+        }
+
+        internal static List<MeetingInfo> ReadCursor(Func<object> first, Func<object> next,
+            Func<object, MeetingInfo> read, Action<object> release, Func<bool> cancelled, out int errors, out bool capped)
+        {
+            errors = 0;
+            capped = false;
+            List<MeetingInfo> result = new List<MeetingInfo>();
+            object raw = first();
+            for (int index = 0; raw != null; index++)
+            {
+                try
+                {
+                    if (cancelled()) throw new OperationCanceledException();
+                    MeetingInfo meeting = read(raw);
+                    if (meeting != null) result.Add(meeting);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch { errors++; }
+                finally { release(raw); }
+                raw = next();
+                if (index >= 499 && raw != null) { capped = true; release(raw); break; }
+            }
+            return result;
         }
 
         private static string CompactAttendees(string value)
@@ -165,7 +219,7 @@ namespace WorkMatePro
             try { if (Marshal.IsComObject(value)) Marshal.FinalReleaseComObject(value); } catch { }
         }
 
-        public void Dispose() { disposed = true; }
+        public void Dispose() { disposed = true; SetEnabled(false); }
     }
 
     public sealed class MeetingRadarWindow : Window

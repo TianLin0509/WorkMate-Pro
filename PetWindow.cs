@@ -3639,8 +3639,7 @@ namespace WorkMatePro
             Button tracking = RowButton(app.Store.Data.TrackEnabled ? "暂停时间统计" : "恢复时间统计", "不记录窗口标题");
             tracking.Click += delegate
             {
-                app.Store.Data.TrackEnabled = !app.Store.Data.TrackEnabled;
-                app.Store.Save();
+                app.Store.SetTrackingEnabled(!app.Store.Data.TrackEnabled);
                 pet.RefreshPet();
                 BuildContent();
             };

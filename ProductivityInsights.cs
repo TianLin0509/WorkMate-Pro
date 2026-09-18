@@ -47,8 +47,15 @@ namespace WorkMatePro
 
         public bool CandidateActive { get { return interruptedAt != DateTime.MinValue; } }
 
+        public void Reset()
+        {
+            focusSince = interruptedAt = lastRecordedAt = DateTime.MinValue;
+            interruptionKind = "";
+        }
+
         public void Observe(DataStore store, BehaviorState state, string category, DateTime now)
         {
+            if (!store.Data.TrackEnabled) { Reset(); return; }
             bool productive = state == BehaviorState.Typing || state == BehaviorState.Reading || state == BehaviorState.Thinking;
             string kind = KindFor(state, category);
 

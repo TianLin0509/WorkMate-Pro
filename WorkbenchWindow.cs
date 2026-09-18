@@ -27,6 +27,11 @@ namespace WorkMatePro
         private readonly System.Windows.Threading.DispatcherTimer foregroundLease;
         private readonly List<string> customPetPhotoPaths = new List<string>();
         private string customPetProjectPath = "";
+        private string memoDraft = "";
+        private string memoDraftTerm = "short";
+        private bool memoDraftImportant, memoDraftUrgent;
+        private int memoSelectionStart, memoSelectionLength;
+        private readonly double[] memoScrollOffsets = new double[2];
 
         public WorkbenchWindow(WorkMateApp app)
         {
@@ -83,7 +88,11 @@ namespace WorkMatePro
             pageHost = new Grid { Background = Theme.Canvas, Margin = new Thickness(0) };
             Grid.SetColumn(pageHost, 1);
             body.Children.Add(pageHost);
-            Content = shell;
+            shell.Width = 980;
+            shell.Height = 700;
+            Content = new Viewbox { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Child = shell };
+            Loaded += delegate { FitWorkArea(CurrentWorkArea()); };
+            LocationChanged += delegate { if (IsLoaded) FitWorkArea(CurrentWorkArea()); };
 
             PreviewKeyDown += delegate(object sender, KeyEventArgs e)
             {
@@ -120,6 +129,7 @@ namespace WorkMatePro
             minimize.Click += delegate { WindowState = WindowState.Minimized; };
             controls.Children.Add(minimize);
             Button close = Theme.GhostButton("×");
+            System.Windows.Automation.AutomationProperties.SetAutomationId(close, "workbench-close");
             close.Width = 42;
             close.Padding = new Thickness(0);
             close.FontSize = 18;
@@ -182,6 +192,7 @@ namespace WorkMatePro
             button.Padding = new Thickness(17, 12, 17, 12);
             button.Margin = new Thickness(0, 2, 0, 2);
             button.Tag = page;
+            System.Windows.Automation.AutomationProperties.SetAutomationId(button, "workbench-nav-" + page);
             button.Click += delegate { ShowPage(page); };
             return button;
         }
@@ -219,6 +230,34 @@ namespace WorkMatePro
             if (!IsVisible) return;
             BuildSidebar();
             BuildCurrentPage();
+        }
+
+        internal void FitWorkArea(Rect area)
+        {
+            double width = Math.Min(980, Math.Max(1, area.Width));
+            double height = Math.Min(700, Math.Max(1, area.Height));
+            if (Width != width) Width = width;
+            if (Height != height) Height = height;
+            double left = Math.Max(area.Left, Math.Min(Left, area.Right - width));
+            double top = Math.Max(area.Top, Math.Min(Top, area.Bottom - height));
+            if (!double.IsNaN(left) && Left != left) Left = left;
+            if (!double.IsNaN(top) && Top != top) Top = top;
+        }
+
+        private Rect CurrentWorkArea()
+        {
+            Rect area = WindowPlacement.WorkAreaFor(this);
+            // Isolated GUI verification can emulate the DIP area of a small/high-DPI monitor.
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WORKMATE_TEST_DIR")))
+            {
+                string value = Environment.GetEnvironmentVariable("WORKMATE_WORKBENCH_TEST_AREA") ?? "";
+                string[] parts = value.Split(',');
+                double width, height;
+                if (parts.Length == 2 && double.TryParse(parts[0], out width) && double.TryParse(parts[1], out height)
+                    && width >= 400 && height >= 300)
+                    area = new Rect(area.Left, area.Top, Math.Min(area.Width, width), Math.Min(area.Height, height));
+            }
+            return area;
         }
 
         private void BuildCurrentPage()
@@ -271,9 +310,11 @@ namespace WorkMatePro
             filters.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             StackPanel tabs = new StackPanel { Orientation = Orientation.Horizontal };
             Button active = SmallTab("进行中", !showCompleted);
+            System.Windows.Automation.AutomationProperties.SetAutomationId(active, "memo-filter-active");
             active.Click += delegate { showCompleted = false; BuildCurrentPage(); };
             tabs.Children.Add(active);
             Button done = SmallTab("已完成", showCompleted);
+            System.Windows.Automation.AutomationProperties.SetAutomationId(done, "memo-filter-done");
             done.Margin = new Thickness(8, 0, 0, 0);
             done.Click += delegate { showCompleted = true; BuildCurrentPage(); };
             tabs.Children.Add(done);
@@ -285,6 +326,9 @@ namespace WorkMatePro
             page.Children.Add(filters);
 
             ScrollViewer scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Hidden, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+            int scrollSlot = showCompleted ? 1 : 0;
+            scroll.Loaded += delegate { scroll.ScrollToVerticalOffset(memoScrollOffsets[scrollSlot]); };
+            scroll.ScrollChanged += delegate { if (scroll.IsLoaded) memoScrollOffsets[scrollSlot] = scroll.VerticalOffset; };
             StackPanel list = new StackPanel { Margin = new Thickness(0, 0, 4, 0) };
             IEnumerable<MemoItem> memos = app.Store.Data.Memos.Where(delegate(MemoItem memo) { return memo.IsDone == showCompleted; });
             if (showCompleted) memos = memos.OrderByDescending(delegate(MemoItem memo) { return memo.DoneAt; }).Take(80);
@@ -309,12 +353,13 @@ namespace WorkMatePro
             label.Margin = new Thickness(1, 0, 0, 9);
             stack.Children.Add(label);
 
-            TextBox input = new TextBox { MaxLength = 300 };
+            TextBox input = new TextBox { MaxLength = 300, Text = memoDraft };
+            input.Select(Math.Min(memoSelectionStart, input.Text.Length), Math.Min(memoSelectionLength, input.Text.Length - Math.Min(memoSelectionStart, input.Text.Length)));
+            input.TextChanged += delegate { memoDraft = input.Text; };
+            input.SelectionChanged += delegate { memoSelectionStart = input.SelectionStart; memoSelectionLength = input.SelectionLength; };
+            System.Windows.Automation.AutomationProperties.SetAutomationId(input, "memo-draft");
             System.Windows.Automation.AutomationProperties.SetName(input, "新增备忘录内容");
             Border inputShell = Theme.InputShell(input, 52);
-            string selectedTerm = "short";
-            bool important = false;
-            bool urgent = false;
 
             Grid row = new Grid();
             row.ColumnDefinitions.Add(new ColumnDefinition());
@@ -322,6 +367,7 @@ namespace WorkMatePro
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             row.Children.Add(inputShell);
             Button add = Theme.PrimaryButton("记下");
+            System.Windows.Automation.AutomationProperties.SetAutomationId(add, "memo-add");
             add.Width = 82;
             add.Height = 52;
             Grid.SetColumn(add, 2);
@@ -330,9 +376,10 @@ namespace WorkMatePro
 
             StackPanel options = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
             options.Children.Add(Theme.Text("时效", 11, Theme.Faint, FontWeights.Normal));
-            Button shortTerm = ChoiceButton("短期", true);
+            Button shortTerm = ChoiceButton("短期", memoDraftTerm == "short");
             shortTerm.Margin = new Thickness(10, 0, 6, 0);
-            Button longTerm = ChoiceButton("长期", false);
+            Button longTerm = ChoiceButton("长期", memoDraftTerm == "long");
+            System.Windows.Automation.AutomationProperties.SetAutomationId(longTerm, "memo-term-long");
             options.Children.Add(shortTerm);
             options.Children.Add(longTerm);
             Button importantButton = null;
@@ -342,26 +389,30 @@ namespace WorkMatePro
                 TextBlock quadrantLabel = Theme.Text("四象限", 11, Theme.Faint, FontWeights.Normal);
                 quadrantLabel.Margin = new Thickness(22, 0, 0, 0);
                 options.Children.Add(quadrantLabel);
-                importantButton = ChoiceButton("重要", false);
+                importantButton = ChoiceButton("重要", memoDraftImportant);
                 importantButton.Margin = new Thickness(10, 0, 6, 0);
-                urgentButton = ChoiceButton("紧急", false);
+                urgentButton = ChoiceButton("紧急", memoDraftUrgent);
                 options.Children.Add(importantButton);
                 options.Children.Add(urgentButton);
             }
             stack.Children.Add(options);
 
-            shortTerm.Click += delegate { selectedTerm = "short"; PaintChoice(shortTerm, true); PaintChoice(longTerm, false); };
-            longTerm.Click += delegate { selectedTerm = "long"; PaintChoice(shortTerm, false); PaintChoice(longTerm, true); };
+            shortTerm.Click += delegate { memoDraftTerm = "short"; PaintChoice(shortTerm, true); PaintChoice(longTerm, false); };
+            longTerm.Click += delegate { memoDraftTerm = "long"; PaintChoice(shortTerm, false); PaintChoice(longTerm, true); };
             if (importantButton != null)
             {
-                importantButton.Click += delegate { important = !important; PaintChoice(importantButton, important); };
-                urgentButton.Click += delegate { urgent = !urgent; PaintChoice(urgentButton, urgent); };
+                importantButton.Click += delegate { memoDraftImportant = !memoDraftImportant; PaintChoice(importantButton, memoDraftImportant); };
+                urgentButton.Click += delegate { memoDraftUrgent = !memoDraftUrgent; PaintChoice(urgentButton, memoDraftUrgent); };
             }
 
             Action save = delegate
             {
-                MemoItem memo = app.Store.AddMemo(input.Text, selectedTerm, important, urgent);
+                MemoItem memo = app.Store.AddMemo(input.Text, memoDraftTerm, memoDraftImportant, memoDraftUrgent);
                 if (memo == null) { input.Focus(); return; }
+                memoDraft = "";
+                memoSelectionStart = memoSelectionLength = 0;
+                memoDraftTerm = "short";
+                memoDraftImportant = memoDraftUrgent = false;
                 app.Pet.Celebrate("已经记下");
                 BuildCurrentPage();
             };
@@ -569,8 +620,7 @@ namespace WorkMatePro
             toggle.FontSize = 10.5;
             toggle.Click += delegate
             {
-                app.Store.Data.TrackEnabled = !app.Store.Data.TrackEnabled;
-                app.Store.Save();
+                app.Store.SetTrackingEnabled(!app.Store.Data.TrackEnabled);
                 app.Pet.RefreshPet();
                 BuildCurrentPage();
             };
@@ -754,6 +804,13 @@ namespace WorkMatePro
             ScrollViewer scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Hidden, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
             StackPanel content = new StackPanel { Margin = new Thickness(0, 0, 6, 0) };
             StackPanel utilityContent = new StackPanel();
+            if (!app.Store.Data.WeatherNetworkAllowed)
+            {
+                TextBlock consent = Theme.Text("天气联网未授权：原有提醒配置已保留。请在设置中明确开启“允许天气联网”并填写城市；本地能力可直接使用。", 11, Theme.Accent, FontWeights.SemiBold);
+                consent.Margin = new Thickness(0, 0, 0, 14);
+                System.Windows.Automation.AutomationProperties.SetAutomationId(consent, "weather-consent-notice");
+                content.Children.Add(consent);
+            }
 
             TextBlock updateStatus = Theme.Text(
                 "当前版本 v" + app.Updates.CurrentVersion + "。默认只检查本地更新收件箱、程序目录和下载目录；不会在后台访问 GitHub。",
@@ -1187,10 +1244,14 @@ namespace WorkMatePro
         private UIElement BuildSettingRows()
         {
             StackPanel rows = new StackPanel();
+            rows.Children.Add(SettingRow("允许天气联网", "默认关闭；升级保留原提醒配置，需确认授权。开启后城市/坐标发送至 Open-Meteo；关闭拦截自动及手动天气查询。不影响你主动检查 GitHub 更新。", app.Store.Data.WeatherNetworkAllowed, delegate
+            {
+                app.SetWeatherNetworkAllowed(!app.Store.Data.WeatherNetworkAllowed);
+                BuildCurrentPage();
+            }));
             rows.Children.Add(SettingRow("时间统计", "只累计应用类别；空闲超过 5 分钟自动停止计时。", app.Store.Data.TrackEnabled, delegate
             {
-                app.Store.Data.TrackEnabled = !app.Store.Data.TrackEnabled;
-                app.Store.Save();
+                app.Store.SetTrackingEnabled(!app.Store.Data.TrackEnabled);
                 app.Pet.RefreshPet();
                 BuildCurrentPage();
             }));
@@ -1241,6 +1302,7 @@ namespace WorkMatePro
             {
                 app.Store.Data.MeetingRadarEnabled = !app.Store.Data.MeetingRadarEnabled;
                 app.Store.Save();
+                app.MeetingRadar.SetEnabled(app.Store.Data.MeetingRadarEnabled);
                 if (app.Store.Data.MeetingRadarEnabled) app.MeetingRadar.PollIfDue(true);
                 BuildCurrentPage();
             }));
@@ -1345,6 +1407,9 @@ namespace WorkMatePro
             toggle.Padding = new Thickness(13, 7, 13, 7);
             toggle.FontSize = 10.5;
             System.Windows.Automation.AutomationProperties.SetName(toggle, title + (enabled ? " 已开启" : " 已关闭"));
+            if (title == "允许天气联网") System.Windows.Automation.AutomationProperties.SetAutomationId(toggle, "weather-network-consent");
+            if (title == "Outlook 会议雷达") System.Windows.Automation.AutomationProperties.SetAutomationId(toggle, "outlook-consent");
+            if (title == "时间统计") System.Windows.Automation.AutomationProperties.SetAutomationId(toggle, "tracking-consent");
             toggle.Click += delegate { action(); };
             Grid.SetColumn(toggle, 1);
             row.Children.Add(toggle);
@@ -1388,7 +1453,7 @@ namespace WorkMatePro
         private UIElement BuildDataCard()
         {
             StackPanel stack = new StackPanel();
-            stack.Children.Add(Theme.Text("数据永不离开本机", 13, Theme.Ink, FontWeights.Bold));
+            stack.Children.Add(Theme.Text("本地处理，联网须授权", 13, Theme.Ink, FontWeights.Bold));
             TextBlock path = Theme.Text(app.Store.DataPath, 10.5, Theme.Muted, FontWeights.Normal);
             path.Margin = new Thickness(0, 6, 0, 13);
             stack.Children.Add(path);
@@ -1420,7 +1485,8 @@ namespace WorkMatePro
             };
             actions.Children.Add(clear);
             stack.Children.Add(actions);
-            TextBlock version = Theme.Text("WorkMate Pro 1.24 · 自适应陪伴、今日一件事与专属桌宠", 10, Theme.Faint, FontWeights.Normal);
+            TextBlock version = Theme.Text("WorkMate Pro " + FileVersionInfo.GetVersionInfo(typeof(WorkbenchWindow).Assembly.Location).FileVersion + " · 自适应陪伴、今日一件事与专属桌宠", 10, Theme.Faint, FontWeights.Normal);
+            System.Windows.Automation.AutomationProperties.SetAutomationId(version, "settings-version");
             version.Margin = new Thickness(0, 14, 0, 0);
             stack.Children.Add(version);
             Border card = Theme.Card(stack, 16, new Thickness(17, 15, 17, 15));

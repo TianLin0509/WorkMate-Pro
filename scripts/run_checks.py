@@ -1,6 +1,8 @@
 """Run every WorkMate verification entrypoint against this checkout on Windows."""
 from datetime import datetime
 import os
+import json
+import tempfile
 from pathlib import Path
 import subprocess
 import sys
@@ -16,12 +18,19 @@ def main():
         return 2
     output = ROOT / "artifacts" / (datetime.now().strftime("%Y%m%d-%H%M%S") + "-workmate-checks-" + uuid.uuid4().hex[:8])
     output.mkdir(parents=True, exist_ok=False)
+    # Legacy .NET file APIs still enforce MAX_PATH. Keep checkout/build/artifacts
+    # local to the worktree, but allocate a unique short data root for this run.
+    test_base = Path(os.environ.get("WORKMATE_TEST_BASE", tempfile.gettempdir()))
+    test_base.mkdir(parents=True, exist_ok=True)
+    data_root = Path(tempfile.mkdtemp(prefix="wm-", dir=test_base))
+    (output / "test-roots.json").write_text(json.dumps({"checkout": str(ROOT), "data_root": str(data_root)}, indent=2), encoding="utf-8")
     ps = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
     base = [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
     stages = [
         ("build-and-300-frame-qc", ["scripts/build.ps1"]),
-        ("stress-and-18-selftests", ["scripts/verify-v124-stress.ps1", "-OutputDirectory", str(output / "stress")]),
-        ("custom-pet-four-step-ui", ["scripts/verify-custom-pet-e2e.ps1", "-OutputDirectory", str(output / "custom-pet-ui")]),
+        ("stress-and-18-selftests", ["scripts/verify-v124-stress.ps1", "-OutputDirectory", str(output / "stress"), "-DataDirectory", str(data_root / "s")]),
+        ("custom-pet-four-step-ui", ["scripts/verify-custom-pet-e2e.ps1", "-OutputDirectory", str(output / "custom-pet-ui"), "-DataDirectory", str(data_root / "u")]),
+        ("workbench-real-interaction-ui", ["scripts/verify-workbench-e2e.ps1", "-OutputDirectory", str(output / "workbench-ui"), "-DataDirectory", str(data_root / "w")]),
     ]
     started = time.monotonic()
     for name, args in stages:

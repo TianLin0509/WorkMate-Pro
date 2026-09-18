@@ -33,8 +33,19 @@ function Find-Element($root, [string]$id) {
     throw "Control missing: $id"
 }
 function Invoke-Control($root, [string]$id) {
+    Write-Host "ACTION $id"
     $element = Find-Element $root $id
+    $before = $element.GetRuntimeId() -join ','
     ([System.Windows.Automation.InvokePattern]$element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+    if ($id -ne 'memo-term-long') {
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $current = Find-Element $root $id
+            if (($current.GetRuntimeId() -join ',') -ne $before) { return }
+            Start-Sleep -Milliseconds 80
+        } while ([DateTime]::UtcNow -lt $deadline)
+        throw "UI rebuild did not finish after $id"
+    }
 }
 function Read-Draft($root) {
     $element = Find-Element $root 'memo-draft'
@@ -46,7 +57,7 @@ function Wait-Draft($root, [string]$expected) {
         if ((Read-Draft $root) -eq $expected) { return }
         Start-Sleep -Milliseconds 80
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw 'Draft value did not match after real UI action.'
+    throw "Draft value did not match: expected=[$expected] actual=[$(Read-Draft $root)]"
 }
 try {
     foreach ($area in @('980,700','640,460')) {
@@ -75,6 +86,8 @@ try {
             $input = Find-Element $window 'memo-draft'
             $draft = '草稿跨筛选与页面保留 ' + $tag
             ([System.Windows.Automation.ValuePattern]$input.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($draft)
+            Write-Host "ACTION set-draft area=$area pid=$($process.Id)"
+            Wait-Draft $window $draft
             $textPattern = [System.Windows.Automation.TextPattern]$input.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
             $textPattern.DocumentRange.FindText('跨筛选', $false, $false).Select()
             Invoke-Control $window 'memo-term-long'

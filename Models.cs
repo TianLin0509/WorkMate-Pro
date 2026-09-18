@@ -360,7 +360,7 @@ namespace WorkMatePro
                 Data.EnergyMode = "steady";
                 Data.EnergyModeDate = "";
             }
-                // Preserve explicit weather choices; missing flags remain opt-in.
+            if (Data.WorkBreakMinutes < 15 || Data.WorkBreakMinutes > 240) Data.WorkBreakMinutes = 60;
             if (Data.DailyBriefingHour < 6 || Data.DailyBriefingHour > 12) Data.DailyBriefingHour = 9;
             Data.WeatherCity = (Data.WeatherCity ?? "").Trim();
             if (Data.WeatherCity.Length > 50) Data.WeatherCity = Data.WeatherCity.Substring(0, 50);

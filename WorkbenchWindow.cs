@@ -91,8 +91,8 @@ namespace WorkMatePro
             shell.Width = 980;
             shell.Height = 700;
             Content = new Viewbox { Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly, Child = shell };
-            Loaded += delegate { FitWorkArea(CurrentWorkArea()); };
-            LocationChanged += delegate { if (IsLoaded) FitWorkArea(CurrentWorkArea()); };
+            Loaded += delegate { FitWorkArea(CurrentWorkArea(), true); };
+            LocationChanged += delegate { if (IsLoaded) FitWorkArea(CurrentWorkArea(), false); };
 
             PreviewKeyDown += delegate(object sender, KeyEventArgs e)
             {
@@ -113,7 +113,12 @@ namespace WorkMatePro
             bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             bar.MouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e)
             {
-                if (e.ChangedButton == MouseButton.Left) try { DragMove(); } catch { }
+                if (e.ChangedButton == MouseButton.Left)
+                {
+                    try { DragMove(); }
+                    catch { }
+                    finally { FitWorkArea(CurrentWorkArea(), true); }
+                }
             };
             StackPanel title = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(22, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
             title.Children.Add(Theme.Text("WORKMATE", 11, Theme.Accent, FontWeights.Bold));
@@ -232,16 +237,27 @@ namespace WorkMatePro
             BuildCurrentPage();
         }
 
-        internal void FitWorkArea(Rect area)
+        internal static Rect CalculateWorkAreaPlacement(Rect current, Rect area, bool constrainPosition)
         {
             double width = Math.Min(980, Math.Max(1, area.Width));
             double height = Math.Min(700, Math.Max(1, area.Height));
-            if (Width != width) Width = width;
-            if (Height != height) Height = height;
-            double left = Math.Max(area.Left, Math.Min(Left, area.Right - width));
-            double top = Math.Max(area.Top, Math.Min(Top, area.Bottom - height));
-            if (!double.IsNaN(left) && Left != left) Left = left;
-            if (!double.IsNaN(top) && Top != top) Top = top;
+            double left = constrainPosition ? Math.Max(area.Left, Math.Min(current.Left, area.Right - width)) : current.Left;
+            double top = constrainPosition ? Math.Max(area.Top, Math.Min(current.Top, area.Bottom - height)) : current.Top;
+            return new Rect(left, top, width, height);
+        }
+
+        internal void FitWorkArea(Rect area, bool constrainPosition)
+        {
+            Rect placement = CalculateWorkAreaPlacement(new Rect(double.IsNaN(Left) ? area.Left : Left,
+                double.IsNaN(Top) ? area.Top : Top, Width, Height), area, constrainPosition);
+            if (Width != placement.Width) Width = placement.Width;
+            if (Height != placement.Height) Height = placement.Height;
+            // Do not clamp while DragMove is crossing monitor boundaries.
+            if (constrainPosition)
+            {
+                if (Left != placement.Left) Left = placement.Left;
+                if (Top != placement.Top) Top = placement.Top;
+            }
         }
 
         private Rect CurrentWorkArea()

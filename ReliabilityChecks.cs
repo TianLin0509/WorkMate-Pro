@@ -121,6 +121,12 @@ namespace WorkMatePro
                 legacy.Data.WeatherNetworkAllowed = true;
                 legacy.Save();
                 Check(new DataStore().Data.WeatherNetworkAllowed, "explicit-weather-consent-persists", log, ref failures);
+                foreach (int invalid in new[] { -1, 0, 14, 241, int.MaxValue })
+                {
+                    legacy.Data.WorkBreakMinutes = invalid;
+                    legacy.Save();
+                    Check(new DataStore().Data.WorkBreakMinutes == 60, "invalid-work-break-normalized-" + invalid, log, ref failures);
+                }
                 OpenMeteoWeatherService weather = new OpenMeteoWeatherService();
                 Check(!weather.GetAmbient("Shanghai", true).Success, "actual-weather-entry-rejects-missing-consent", log, ref failures);
                 using (OutlookMeetingRadar radar = new OutlookMeetingRadar())
@@ -159,6 +165,14 @@ namespace WorkMatePro
                 Queue<double> queue = new Queue<double>(); queue.Enqueue(boundary - 70); queue.Enqueue(boundary);
                 typeof(RawInputMonitor).GetMethod("Prune", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new object[] { queue, boundary + 10, 60.0 });
                 Check(queue.Count == 1, "input-queue-prunes-on-shared-monotonic-clock", log, ref failures);
+                System.Windows.Rect leftMonitor = new System.Windows.Rect(-1920, 0, 1920, 1080);
+                System.Windows.Rect crossing = new System.Windows.Rect(-100, 50, 980, 700);
+                System.Windows.Rect dragging = WorkbenchWindow.CalculateWorkAreaPlacement(crossing, leftMonitor, false);
+                System.Windows.Rect releasedPlacement = WorkbenchWindow.CalculateWorkAreaPlacement(crossing,
+                    new System.Windows.Rect(0, 0, 640, 460), true);
+                Check(dragging.Left == -100 && dragging.Top == 50 && releasedPlacement.Left == 0 && releasedPlacement.Top == 0
+                    && releasedPlacement.Width == 640 && releasedPlacement.Height == 460,
+                    "workbench-negative-monitor-crossing-unclamped-until-release", log, ref failures);
             }
             finally
             {
